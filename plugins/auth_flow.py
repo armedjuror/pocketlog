@@ -174,7 +174,7 @@ class AuthFlowMixin:
         auth_service.create_session(user.id, db)
         auth_service.clear_bot_state(platform, chat_id, db)
         await self.send_message(chat_id, self.welcome_text(user))
-        return user
+        return None  # don't parse the email text as a transaction
 
     async def _handle_otp(
         self, msg: InboundMessage, db: Session, state_row
@@ -193,8 +193,8 @@ class AuthFlowMixin:
 
         auth_service.clear_bot_state(platform, chat_id, db)
         user = db.query(User).get(state_row.user_id)
-        await self.send_message(chat_id, self.welcome_text(user))
-        return user
+        await self.send_message(chat_id, f"✅ Logged in as *{user.name}*. What would you like to log?")
+        return None
 
     # ── Merge / cross-plugin verification ─────────────────────────────────
 
@@ -296,9 +296,9 @@ class AuthFlowMixin:
         user = db.query(User).get(state_row.user_id)
         await self.send_message(
             chat_id,
-            f"*{platform.capitalize()}* linked to *{user.email}*!\n\n" + self.welcome_text(user),
+            f"✅ *{platform.capitalize()}* linked to *{user.email}*! Logged in as *{user.name}*.",
         )
-        return user
+        return None
 
     # ── OTP delivery helpers ───────────────────────────────────────────────
 

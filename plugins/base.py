@@ -116,11 +116,12 @@ class BasePlugin(ABC):
         """
         import re
         text = (msg.text or "").strip().lower()
-        if not re.search(
-            r"\baccounts?\b|/accounts",
-            text,
-        ):
+        if not re.search(r"\baccounts?\b|/accounts", text):
             return None
+
+        # Management intent — redirect to dashboard
+        if re.search(r"\b(close|delete|deactivate|remove|cancel|disable)\b", text):
+            return "Account management isn't available via bot — use the dashboard to close or deactivate accounts."
 
         from services import get_accounts
         accounts = get_accounts(db, user_id=msg.user_id)
@@ -129,7 +130,8 @@ class BasePlugin(ABC):
 
         lines = ["*Your accounts:*\n"]
         for a in accounts:
-            lines.append(f"  • *{a['name']}* ({a['type']}) — ₹{a['balance']:,.2f}")
+            type_label = str(a['type']).split('.')[-1].replace('_', ' ').title()
+            lines.append(f"  • *{a['name']}* ({type_label}) — ₹{a['balance']:,.2f}")
         return "\n".join(lines)
 
     def maybe_list_categories(self, msg: InboundMessage, db) -> Optional[str]:  # noqa: F821
