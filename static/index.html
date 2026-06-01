@@ -1,0 +1,1172 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Hisaab — Personal Finance by Make Your Reps</title>
+<link rel="icon" href="/static/favicon.svg" type="image/svg+xml">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Merriweather:ital,opsz,wght@0,18..144,300..900;1,18..144,300..900&family=DM+Sans:wght@300;400;500&display=swap');
+
+  :root {
+    --bg: #0d0f14;
+    --surface: #161920;
+    --surface2: #1e2230;
+    --border: #2a2f40;
+    --text: #e8eaf0;
+    --muted: #6b7280;
+    --accent: rgba(152, 117, 63, 1);
+    --accent2: rgba(216, 168, 90, 1);
+    --green: #22c55e;
+    --red: #ef4444;
+    --yellow: #f59e0b;
+    --radius: 14px;
+    --font-head: 'Merriweather', sans-serif;
+    --font-body: 'DM Sans', sans-serif;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { background: var(--bg); color: var(--text); font-family: var(--font-body); min-height: 100vh; }
+
+  /* Layout */
+  .shell { display: flex; min-height: 100vh; }
+  .sidebar {
+    width: 220px; background: var(--surface); border-right: 1px solid var(--border);
+    display: flex; flex-direction: column; padding: 24px 0; position: fixed;
+    height: 100vh; z-index: 100; transition: transform .3s;
+    overflow-y: auto;
+  }
+  .sidebar-spacer { flex: 1; }
+  .logout-btn {
+    display: flex; align-items: center; gap: 10px;
+    padding: 11px 20px; margin: 0 12px 8px;
+    cursor: pointer; color: var(--muted); font-size: 14px; font-weight: 500;
+    transition: all .18s; border-radius: 8px;
+    background: none; border: none; font-family: var(--font-body);
+    width: calc(100% - 24px); text-align: left;
+  }
+  .logout-btn:hover { color: var(--red); background: rgba(239,68,68,.08); }
+  .sidebar-logo { padding: 0 20px 28px; display: flex; align-items: center; }
+  .nav-item {
+    display: flex; align-items: center; gap: 10px; padding: 11px 20px;
+    cursor: pointer; color: var(--muted); font-size: 14px; font-weight: 500;
+    transition: all .18s; border-left: 3px solid transparent; white-space: nowrap;
+  }
+  .nav-item:hover { color: var(--text); background: var(--surface2); }
+  .nav-item.active { color: var(--accent); border-left-color: var(--accent); background: rgba(124,106,247,.08); }
+  .nav-icon { font-size: 18px; width: 22px; text-align: center; }
+  .main { margin-left: 220px; flex: 1; padding: 28px; max-width: calc(100vw - 220px); }
+
+  /* Header */
+  .topbar { display: flex; align-items: center; justify-content: space-between; margin-bottom: 28px; gap: 12px; flex-wrap: wrap; }
+  .topbar h1 { font-family: var(--font-head); font-size: 26px; font-weight: 800; }
+  .topbar-right { display: flex; gap: 10px; align-items: center; }
+  .month-nav { display: flex; align-items: center; gap: 8px; background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 6px 12px; }
+  .month-nav button { background: none; border: none; color: var(--muted); cursor: pointer; font-size: 18px; padding: 0 4px; }
+  .month-nav span { font-size: 14px; font-weight: 500; min-width: 100px; text-align: center; }
+  .btn { padding: 9px 18px; border-radius: 10px; border: none; cursor: pointer; font-family: var(--font-body); font-size: 14px; font-weight: 500; transition: all .18s; }
+  .btn-primary { background: var(--accent); color: #fff; }
+  .btn-primary:hover { background: #6b58e8; }
+  .btn-ghost { background: var(--surface2); color: var(--text); border: 1px solid var(--border); }
+  .btn-ghost:hover { border-color: var(--accent); color: var(--accent); }
+  .btn-sm { padding: 6px 12px; font-size: 13px; }
+  .btn-danger { background: rgba(239,68,68,.15); color: var(--red); border: 1px solid rgba(239,68,68,.3); }
+  .btn-danger:hover { background: rgba(239,68,68,.25); }
+  .btn-success { background: rgba(34,197,94,.15); color: var(--green); border: 1px solid rgba(34,197,94,.3); }
+
+  /* Cards */
+  .cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 16px; margin-bottom: 24px; }
+  .card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 20px; }
+  .card-label { font-size: 12px; color: var(--muted); text-transform: uppercase; letter-spacing: .8px; margin-bottom: 8px; }
+  .card-value { font-family: var(--font-head); font-size: 24px; font-weight: 700; }
+  .card-value.green { color: var(--green); }
+  .card-value.red { color: var(--red); }
+  .card-value.accent { color: var(--accent); }
+  .card-sub { font-size: 12px; color: var(--muted); margin-top: 4px; }
+
+  /* Grids */
+  .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; margin-bottom: 24px; }
+  .grid3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 20px; margin-bottom: 24px; }
+  .chart-card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 20px; }
+  .chart-title { font-family: var(--font-head); font-size: 15px; font-weight: 700; margin-bottom: 16px; }
+  .chart-wrap { position: relative; height: 220px; }
+
+  /* Table */
+  .table-wrap { overflow-x: auto; }
+  table { width: 100%; border-collapse: collapse; font-size: 14px; }
+  th { text-align: left; padding: 10px 14px; color: var(--muted); font-size: 12px; text-transform: uppercase; letter-spacing: .6px; border-bottom: 1px solid var(--border); font-weight: 500; }
+  td { padding: 12px 14px; border-bottom: 1px solid rgba(42,47,64,.5); }
+  tr:last-child td { border-bottom: none; }
+  tr:hover td { background: rgba(255,255,255,.02); }
+  .badge { display: inline-flex; align-items: center; gap: 5px; padding: 3px 9px; border-radius: 20px; font-size: 12px; font-weight: 500; }
+  .amount-expense { color: var(--red); font-weight: 600; }
+  .amount-income { color: var(--green); font-weight: 600; }
+
+  /* Budget bars */
+  .budget-item { margin-bottom: 14px; }
+  .budget-row { display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px; font-size: 13px; }
+  .budget-bar-bg { height: 8px; background: var(--surface2); border-radius: 4px; overflow: hidden; }
+  .budget-bar-fill { height: 100%; border-radius: 4px; transition: width .4s; }
+  .pace-warn { font-size: 11px; color: var(--yellow); display: flex; align-items: center; gap: 4px; margin-top: 3px; }
+
+  /* Modal */
+  .modal-overlay { position: fixed; inset: 0; background: rgba(0,0,0,.7); z-index: 200; display: none; align-items: center; justify-content: center; padding: 16px; }
+  .modal-overlay.open { display: flex; }
+  .modal { background: var(--surface); border: 1px solid var(--border); border-radius: 18px; padding: 28px; width: 100%; max-width: 480px; max-height: 90vh; overflow-y: auto; }
+  .modal h2 { font-family: var(--font-head); font-size: 20px; font-weight: 800; margin-bottom: 20px; }
+  .form-row { margin-bottom: 16px; }
+  .form-row label { display: block; font-size: 13px; color: var(--muted); margin-bottom: 6px; }
+  .form-row input, .form-row select, .form-row textarea {
+    width: 100%; padding: 10px 14px; background: var(--surface2); border: 1px solid var(--border);
+    border-radius: 10px; color: var(--text); font-family: var(--font-body); font-size: 14px; outline: none; transition: border .18s;
+  }
+  .form-row input:focus, .form-row select:focus, .form-row textarea:focus { border-color: var(--accent); }
+  .form-row select option { background: var(--surface2); }
+  .form-actions { display: flex; gap: 10px; justify-content: flex-end; margin-top: 20px; }
+  .close-btn { float: right; background: none; border: none; color: var(--muted); font-size: 22px; cursor: pointer; line-height: 1; }
+
+  /* Accounts grid */
+  .accounts-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 16px; }
+  .account-card {
+    background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 20px;
+    position: relative; overflow: hidden; cursor: pointer; transition: border-color .18s;
+  }
+  .account-card:hover { border-color: var(--accent); }
+  .account-card::before { content: ''; position: absolute; top: 0; left: 0; right: 0; height: 3px; background: var(--acc-color, var(--accent)); }
+  .acc-type-badge { font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: .6px; margin-bottom: 8px; }
+  .acc-name { font-family: var(--font-head); font-size: 17px; font-weight: 700; margin-bottom: 12px; }
+  .acc-balance { font-size: 22px; font-weight: 700; }
+  .acc-balance.negative { color: var(--red); }
+  .acc-actions { display: flex; gap: 8px; margin-top: 14px; }
+
+  /* Lending */
+  .lending-item { display: flex; justify-content: space-between; align-items: center; padding: 14px; background: var(--surface2); border-radius: 12px; margin-bottom: 10px; }
+  .lending-left { flex: 1; }
+  .lending-name { font-weight: 600; font-size: 15px; margin-bottom: 2px; }
+  .lending-meta { font-size: 12px; color: var(--muted); }
+  .lending-amount { font-family: var(--font-head); font-size: 18px; font-weight: 700; text-align: right; }
+  .lending-amount.lent { color: var(--accent); }
+  .lending-amount.borrowed { color: var(--yellow); }
+
+  /* Tabs */
+  .tabs { display: flex; gap: 4px; background: var(--surface2); border-radius: 12px; padding: 4px; margin-bottom: 20px; width: fit-content; }
+  .tab { padding: 8px 16px; border-radius: 9px; font-size: 13px; font-weight: 500; cursor: pointer; color: var(--muted); transition: all .18s; }
+  .tab.active { background: var(--surface); color: var(--text); box-shadow: 0 1px 4px rgba(0,0,0,.3); }
+
+  /* Responsive */
+  .hamburger { display: none; background: none; border: none; color: var(--text); font-size: 24px; cursor: pointer; }
+  @media (max-width: 900px) {
+    .grid2 { grid-template-columns: 1fr; }
+    .grid3 { grid-template-columns: 1fr; }
+  }
+  @media (max-width: 700px) {
+    .sidebar { transform: translateX(-100%); }
+    .sidebar.open { transform: translateX(0); }
+    .main { margin-left: 0; max-width: 100vw; padding: 16px; }
+    .hamburger { display: block; }
+    .cards { grid-template-columns: 1fr 1fr; }
+    .topbar h1 { font-size: 20px; }
+  }
+
+  /* Pages */
+  .page { display: none; }
+  .page.active { display: block; }
+
+  /* Empty state */
+  .empty { text-align: center; padding: 40px; color: var(--muted); }
+  .empty-icon { font-size: 40px; margin-bottom: 12px; }
+
+  /* Toast */
+  #toast { position: fixed; bottom: 24px; right: 24px; background: var(--surface2); border: 1px solid var(--border); border-radius: 12px; padding: 12px 18px; font-size: 14px; z-index: 999; transform: translateY(80px); opacity: 0; transition: all .3s; max-width: 300px; }
+  #toast.show { transform: translateY(0); opacity: 1; }
+  #toast.success { border-color: var(--green); color: var(--green); }
+  #toast.error { border-color: var(--red); color: var(--red); }
+
+  /* Sidebar overlay for mobile */
+  .sidebar-overlay { display: none; position: fixed; inset: 0; background: rgba(0,0,0,.5); z-index: 99; }
+  .sidebar-overlay.show { display: block; }
+
+  .section-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px; }
+  .section-title { font-family: var(--font-head); font-size: 16px; font-weight: 700; }
+  input[type="color"] { width: 44px; height: 38px; padding: 2px; cursor: pointer; border-radius: 8px; }
+
+  /* Net worth bar */
+  .nw-bar { height: 6px; background: var(--surface2); border-radius: 3px; margin-top: 8px; overflow: hidden; }
+  .nw-fill { height: 100%; background: linear-gradient(90deg, var(--accent), var(--accent2)); border-radius: 3px; }
+</style>
+</head>
+<body>
+
+<div class="shell">
+  <!-- Sidebar -->
+  <div class="sidebar-overlay" id="sidebarOverlay" onclick="closeSidebar()"></div>
+  <nav class="sidebar" id="sidebar">
+    <div class="sidebar-logo"><img src="/static/logo.svg" alt="Hisaab" height="26"></div>
+    <div class="nav-item active" onclick="showPage('dashboard')">
+      <span class="nav-icon">📊</span> Dashboard
+    </div>
+    <div class="nav-item" onclick="showPage('transactions')">
+      <span class="nav-icon">↕️</span> Transactions
+    </div>
+    <div class="nav-item" onclick="showPage('accounts')">
+      <span class="nav-icon">🏦</span> Accounts
+    </div>
+    <div class="nav-item" onclick="showPage('budgets')">
+      <span class="nav-icon">🎯</span> Budgets
+    </div>
+    <div class="nav-item" onclick="showPage('lending')">
+      <span class="nav-icon">🤝</span> Lending
+    </div>
+    <div class="nav-item" onclick="showPage('analytics')">
+      <span class="nav-icon">📈</span> Analytics
+    </div>
+
+    <div class="sidebar-spacer"></div>
+
+    <button class="logout-btn" onclick="logout()">
+      <span class="nav-icon">↩</span> Sign out
+    </button>
+  </nav>
+
+  <main class="main">
+    <!-- Topbar -->
+    <div class="topbar">
+      <div style="display:flex;align-items:center;gap:12px">
+        <button class="hamburger" onclick="toggleSidebar()">☰</button>
+        <h1 id="pageTitle">Dashboard</h1>
+      </div>
+      <div class="topbar-right">
+        <div class="month-nav">
+          <button onclick="prevMonth()">‹</button>
+          <span id="monthLabel">—</span>
+          <button onclick="nextMonth()">›</button>
+        </div>
+        <button class="btn btn-ghost" onclick="exportCSV()" title="Export all data to CSV">⬇ Export</button>
+        <button class="btn btn-primary" onclick="openAddTxn()">+ Add</button>
+      </div>
+    </div>
+
+    <!-- DASHBOARD PAGE -->
+    <div class="page active" id="page-dashboard">
+      <div class="cards" id="summaryCards"></div>
+      <div class="grid2">
+        <div class="chart-card">
+          <div class="chart-title">Daily Spending</div>
+          <div class="chart-wrap"><canvas id="dailyChart"></canvas></div>
+        </div>
+        <div class="chart-card">
+          <div class="chart-title">By Category</div>
+          <div class="chart-wrap"><canvas id="catChart"></canvas></div>
+        </div>
+      </div>
+      <div class="grid2">
+        <div class="chart-card">
+          <div class="section-header">
+            <div class="chart-title" style="margin:0">Budget Pace</div>
+          </div>
+          <div id="budgetPace"></div>
+        </div>
+        <div class="chart-card">
+          <div class="section-header">
+            <div class="chart-title" style="margin:0">Recent Transactions</div>
+          </div>
+          <div id="recentTxns"></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- TRANSACTIONS PAGE -->
+    <div class="page" id="page-transactions">
+      <div style="display:flex;gap:10px;margin-bottom:16px;flex-wrap:wrap">
+        <select id="filterAccount" onchange="loadTransactions()" style="background:var(--surface);border:1px solid var(--border);color:var(--text);padding:8px 12px;border-radius:10px;font-size:13px;outline:none">
+          <option value="">All Accounts</option>
+        </select>
+        <select id="filterCategory" onchange="loadTransactions()" style="background:var(--surface);border:1px solid var(--border);color:var(--text);padding:8px 12px;border-radius:10px;font-size:13px;outline:none">
+          <option value="">All Categories</option>
+        </select>
+      </div>
+      <div class="chart-card">
+        <div class="table-wrap">
+          <table>
+            <thead><tr>
+              <th>Date</th><th>Description</th><th>Category</th><th>Account</th><th>Amount</th><th></th>
+            </tr></thead>
+            <tbody id="txnTableBody"></tbody>
+          </table>
+          <div id="txnEmpty" class="empty" style="display:none">
+            <div class="empty-icon">💸</div>No transactions this month
+          </div>
+        </div>
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-top:14px;font-size:13px;color:var(--muted)">
+          <span id="txnCount"></span>
+          <div style="display:flex;gap:8px">
+            <button class="btn btn-ghost btn-sm" onclick="prevPage()">← Prev</button>
+            <button class="btn btn-ghost btn-sm" onclick="nextPage()">Next →</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ACCOUNTS PAGE -->
+    <div class="page" id="page-accounts">
+      <div style="margin-bottom:16px">
+        <button class="btn btn-primary" onclick="openAddAccount()">+ New Account</button>
+      </div>
+      <div class="accounts-grid" id="accountsGrid"></div>
+    </div>
+
+    <!-- BUDGETS PAGE -->
+    <div class="page" id="page-budgets">
+      <div class="chart-card" style="margin-bottom:20px">
+        <div class="section-header">
+          <div class="section-title">Set Monthly Budgets</div>
+          <button class="btn btn-primary btn-sm" onclick="openAddBudget()">+ Set Budget</button>
+        </div>
+        <div id="budgetList"></div>
+      </div>
+    </div>
+
+    <!-- LENDING PAGE -->
+    <div class="page" id="page-lending">
+      <div style="margin-bottom:16px;display:flex;gap:10px;flex-wrap:wrap">
+        <button class="btn btn-primary" onclick="openAddLending()">+ New Entry</button>
+      </div>
+      <div class="tabs">
+        <div class="tab active" onclick="switchLendingTab('all', this)">All</div>
+        <div class="tab" onclick="switchLendingTab('lent', this)">I Lent</div>
+        <div class="tab" onclick="switchLendingTab('borrowed', this)">I Borrowed</div>
+        <div class="tab" onclick="switchLendingTab('settled', this)">Settled</div>
+      </div>
+      <div class="cards" id="lendingCards"></div>
+      <div id="lendingList"></div>
+    </div>
+
+    <!-- ANALYTICS PAGE -->
+    <div class="page" id="page-analytics">
+      <div class="grid2" style="margin-bottom:20px">
+        <div class="chart-card">
+          <div class="chart-title">6-Month Trend</div>
+          <div class="chart-wrap"><canvas id="trendChart"></canvas></div>
+        </div>
+        <div class="chart-card">
+          <div class="chart-title">Account Balances</div>
+          <div class="chart-wrap"><canvas id="accChart"></canvas></div>
+        </div>
+      </div>
+      <div class="chart-card">
+        <div class="chart-title">Category Breakdown</div>
+        <div id="catBreakdown"></div>
+      </div>
+    </div>
+
+  </main>
+</div>
+
+<!-- Toast -->
+<div id="toast"></div>
+
+<!-- ADD TRANSACTION MODAL -->
+<div class="modal-overlay" id="txnModal">
+  <div class="modal">
+    <button class="close-btn" onclick="closeModal('txnModal')">×</button>
+    <h2 id="txnModalTitle">Add Transaction</h2>
+    <div class="form-row">
+      <label>Type</label>
+      <select id="txnType">
+        <option value="expense">Expense</option>
+        <option value="income">Income</option>
+        <option value="transfer">Transfer</option>
+      </select>
+    </div>
+    <div class="form-row">
+      <label>Amount (₹)</label>
+      <input type="number" id="txnAmount" placeholder="0.00" step="0.01">
+    </div>
+    <div class="form-row">
+      <label>Description</label>
+      <input type="text" id="txnDesc" placeholder="What was this for?">
+    </div>
+    <div class="form-row">
+      <label>Date</label>
+      <input type="date" id="txnDate">
+    </div>
+    <div class="form-row">
+      <label>Account</label>
+      <select id="txnAccount"></select>
+    </div>
+    <div class="form-row" id="toAccountRow" style="display:none">
+      <label>To Account</label>
+      <select id="txnToAccount"></select>
+    </div>
+    <div class="form-row">
+      <label>Category</label>
+      <select id="txnCategory"><option value="">— Select —</option></select>
+    </div>
+    <div class="form-row">
+      <label>Note (optional)</label>
+      <textarea id="txnNote" rows="2" placeholder="Any extra details..."></textarea>
+    </div>
+    <div class="form-actions">
+      <button class="btn btn-ghost" onclick="closeModal('txnModal')">Cancel</button>
+      <button class="btn btn-primary" onclick="saveTxn()">Save</button>
+    </div>
+  </div>
+</div>
+
+<!-- ADD ACCOUNT MODAL -->
+<div class="modal-overlay" id="accountModal">
+  <div class="modal">
+    <button class="close-btn" onclick="closeModal('accountModal')">×</button>
+    <h2 id="accountModalTitle">New Account</h2>
+    <input type="hidden" id="editAccountId">
+    <div class="form-row">
+      <label>Name</label>
+      <input type="text" id="accName" placeholder="e.g. HDFC Savings">
+    </div>
+    <div class="form-row">
+      <label>Type</label>
+      <select id="accType">
+        <option value="bank">Bank Account</option>
+        <option value="credit_card">Credit Card</option>
+        <option value="cash">Cash</option>
+        <option value="metro_card">Metro Card</option>
+        <option value="wallet">Wallet</option>
+        <option value="loan">Loan</option>
+        <option value="chitty">Chitty</option>
+        <option value="other">Other</option>
+      </select>
+    </div>
+    <div class="form-row">
+      <label>Balance / Current Amount (₹)</label>
+      <input type="number" id="accBalance" placeholder="0.00">
+    </div>
+    <div class="form-row">
+      <label>Color</label>
+      <input type="color" id="accColor" value="#6366f1">
+    </div>
+    <div id="loanFields" style="display:none">
+      <div class="form-row">
+        <label>Total Loan / Chitty Amount (₹)</label>
+        <input type="number" id="accTotal" placeholder="0.00">
+      </div>
+      <div class="form-row">
+        <label>Monthly EMI / Installment (₹)</label>
+        <input type="number" id="accEmi" placeholder="0.00">
+      </div>
+      <div class="form-row">
+        <label>Due Date (day of month)</label>
+        <input type="number" id="accDue" placeholder="e.g. 5" min="1" max="31">
+      </div>
+    </div>
+    <div class="form-row">
+      <label>Notes</label>
+      <textarea id="accNotes" rows="2" placeholder="Any details..."></textarea>
+    </div>
+    <div class="form-actions">
+      <button class="btn btn-ghost" onclick="closeModal('accountModal')">Cancel</button>
+      <button class="btn btn-primary" onclick="saveAccount()">Save</button>
+    </div>
+  </div>
+</div>
+
+<!-- ADD BUDGET MODAL -->
+<div class="modal-overlay" id="budgetModal">
+  <div class="modal">
+    <button class="close-btn" onclick="closeModal('budgetModal')">×</button>
+    <h2>Set Budget</h2>
+    <div class="form-row">
+      <label>Category</label>
+      <select id="budgetCategory"></select>
+    </div>
+    <div class="form-row">
+      <label>Amount (₹)</label>
+      <input type="number" id="budgetAmount" placeholder="0.00">
+    </div>
+    <div class="form-actions">
+      <button class="btn btn-ghost" onclick="closeModal('budgetModal')">Cancel</button>
+      <button class="btn btn-primary" onclick="saveBudget()">Save</button>
+    </div>
+  </div>
+</div>
+
+<!-- ADD LENDING MODAL -->
+<div class="modal-overlay" id="lendingModal">
+  <div class="modal">
+    <button class="close-btn" onclick="closeModal('lendingModal')">×</button>
+    <h2>New Lending Entry</h2>
+    <div class="form-row">
+      <label>Type</label>
+      <select id="lendType">
+        <option value="lent">I Lent to Someone</option>
+        <option value="borrowed">I Borrowed from Someone</option>
+      </select>
+    </div>
+    <div class="form-row">
+      <label>Person Name</label>
+      <input type="text" id="lendPerson" placeholder="Name">
+    </div>
+    <div class="form-row">
+      <label>Amount (₹)</label>
+      <input type="number" id="lendAmount" placeholder="0.00">
+    </div>
+    <div class="form-row">
+      <label>Date</label>
+      <input type="date" id="lendDate">
+    </div>
+    <div class="form-row">
+      <label>Due Date (optional)</label>
+      <input type="date" id="lendDue">
+    </div>
+    <div class="form-row">
+      <label>Note</label>
+      <textarea id="lendNote" rows="2" placeholder="Reason / context..."></textarea>
+    </div>
+    <div class="form-actions">
+      <button class="btn btn-ghost" onclick="closeModal('lendingModal')">Cancel</button>
+      <button class="btn btn-primary" onclick="saveLending()">Save</button>
+    </div>
+  </div>
+</div>
+
+<!-- SETTLE MODAL -->
+<div class="modal-overlay" id="settleModal">
+  <div class="modal">
+    <button class="close-btn" onclick="closeModal('settleModal')">×</button>
+    <h2>Record Settlement</h2>
+    <input type="hidden" id="settleLendId">
+    <div class="form-row">
+      <label>Amount Settled (₹)</label>
+      <input type="number" id="settleAmount" placeholder="0.00">
+    </div>
+    <div class="form-actions">
+      <button class="btn btn-ghost" onclick="closeModal('settleModal')">Cancel</button>
+      <button class="btn btn-success" onclick="doSettle()">Confirm</button>
+    </div>
+  </div>
+</div>
+
+<script>
+// ── State ──────────────────────────────────────────────────────────────────
+const MONTHS = ['January','February','March','April','May','June',
+                'July','August','September','October','November','December'];
+const MONTH_ABBR = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+let curMonth, curYear, accounts = [], categories = [];
+let txnPage = 0, txnTotal = 0, LIMIT = 20;
+let lendingFilter = 'all';
+let charts = {};
+
+// init date
+const now = new Date();
+curMonth = now.getMonth() + 1;
+curYear = now.getFullYear();
+
+document.getElementById('monthLabel').textContent = `${MONTHS[curMonth-1]} ${curYear}`;
+document.getElementById('txnDate').value = now.toISOString().slice(0,10);
+document.getElementById('lendDate').value = now.toISOString().slice(0,10);
+
+// ── Navigation ─────────────────────────────────────────────────────────────
+function showPage(name) {
+  document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
+  document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
+  document.getElementById('page-' + name).classList.add('active');
+  document.querySelector(`[onclick="showPage('${name}')"]`).classList.add('active');
+  const titles = { dashboard: 'Dashboard', transactions: 'Transactions',
+    accounts: 'Accounts', budgets: 'Budgets', lending: 'Lending', analytics: 'Analytics' };
+  document.getElementById('pageTitle').textContent = titles[name];
+  closeSidebar();
+  if (name === 'dashboard') loadDashboard();
+  else if (name === 'transactions') { txnPage = 0; loadTransactions(); }
+  else if (name === 'accounts') loadAccounts();
+  else if (name === 'budgets') loadBudgets();
+  else if (name === 'lending') loadLending();
+  else if (name === 'analytics') loadAnalytics();
+}
+
+function toggleSidebar() {
+  document.getElementById('sidebar').classList.toggle('open');
+  document.getElementById('sidebarOverlay').classList.toggle('show');
+}
+function closeSidebar() {
+  document.getElementById('sidebar').classList.remove('open');
+  document.getElementById('sidebarOverlay').classList.remove('show');
+}
+
+function prevMonth() {
+  curMonth--; if (curMonth < 1) { curMonth = 12; curYear--; }
+  document.getElementById('monthLabel').textContent = `${MONTHS[curMonth-1]} ${curYear}`;
+  refreshCurrentPage();
+}
+function nextMonth() {
+  curMonth++; if (curMonth > 12) { curMonth = 1; curYear++; }
+  document.getElementById('monthLabel').textContent = `${MONTHS[curMonth-1]} ${curYear}`;
+  refreshCurrentPage();
+}
+function refreshCurrentPage() {
+  const active = document.querySelector('.page.active').id.replace('page-','');
+  showPage(active);
+}
+
+// ── API helpers ────────────────────────────────────────────────────────────
+async function api(url, method='GET', body=null) {
+  const opts = { method, headers: { 'Content-Type': 'application/json' } };
+  if (body) opts.body = JSON.stringify(body);
+  const r = await fetch(url, opts);
+  if (!r.ok) throw new Error(await r.text());
+  return r.json();
+}
+
+function toast(msg, type='success') {
+  const el = document.getElementById('toast');
+  el.textContent = msg; el.className = 'show ' + type;
+  setTimeout(() => el.className = '', 3000);
+}
+
+// ── Load base data ─────────────────────────────────────────────────────────
+async function loadBase() {
+  [accounts, categories] = await Promise.all([api('/api/accounts'), api('/api/categories')]);
+  populateSelects();
+}
+
+function populateSelects() {
+  const accSelects = ['txnAccount', 'txnToAccount', 'filterAccount'];
+  accSelects.forEach(id => {
+    const el = document.getElementById(id);
+    if (!el) return;
+    const cur = el.value;
+    el.innerHTML = id === 'filterAccount' ? '<option value="">All Accounts</option>' : '';
+    accounts.forEach(a => el.innerHTML += `<option value="${a.id}">${a.name}</option>`);
+    if (cur) el.value = cur;
+  });
+  const catSelects = ['txnCategory', 'budgetCategory', 'filterCategory'];
+  catSelects.forEach(id => {
+    const el = document.getElementById(id);
+    if (!el) return;
+    const cur = el.value;
+    el.innerHTML = id === 'filterCategory' ? '<option value="">All Categories</option>'
+      : '<option value="">— Select —</option>';
+    categories.forEach(c => el.innerHTML += `<option value="${c.id}">${c.icon} ${c.name}</option>`);
+    if (cur) el.value = cur;
+  });
+}
+
+// ── Dashboard ──────────────────────────────────────────────────────────────
+async function loadDashboard() {
+  const [summary, budgets, txns] = await Promise.all([
+    api(`/api/analytics/summary?month=${curMonth}&year=${curYear}`),
+    api(`/api/budgets?month=${curMonth}&year=${curYear}`),
+    api(`/api/transactions?month=${curMonth}&year=${curYear}&limit=5`),
+  ]);
+  renderSummaryCards(summary);
+  renderDailyChart(summary.daily);
+  renderCatChart(summary.by_category);
+  renderBudgetPace(budgets);
+  renderRecentTxns(txns.items);
+}
+
+function renderSummaryCards(s) {
+  const netWorthSign = s.net_worth >= 0 ? 'green' : 'red';
+  const netSign = s.net >= 0 ? 'green' : 'red';
+  document.getElementById('summaryCards').innerHTML = `
+    <div class="card">
+      <div class="card-label">Total Expense</div>
+      <div class="card-value red">₹${fmt(s.total_expense)}</div>
+    </div>
+    <div class="card">
+      <div class="card-label">Total Income</div>
+      <div class="card-value green">₹${fmt(s.total_income)}</div>
+    </div>
+    <div class="card">
+      <div class="card-label">Net</div>
+      <div class="card-value ${netSign}">${s.net >= 0 ? '+' : ''}₹${fmt(s.net)}</div>
+    </div>
+    <div class="card">
+      <div class="card-label">Net Worth</div>
+      <div class="card-value ${netWorthSign} accent">₹${fmt(s.net_worth)}</div>
+    </div>`;
+}
+
+function renderDailyChart(daily) {
+  if (charts.daily) charts.daily.destroy();
+  const ctx = document.getElementById('dailyChart').getContext('2d');
+  charts.daily = new Chart(ctx, {
+    type: 'bar',
+    data: {
+      labels: daily.map(d => d.date.slice(8)),
+      datasets: [{
+        data: daily.map(d => d.total),
+        backgroundColor: 'rgba(124,106,247,.6)',
+        borderColor: '#7c6af7', borderWidth: 1, borderRadius: 4,
+      }]
+    },
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      plugins: { legend: { display: false } },
+      scales: {
+        x: { grid: { color: '#2a2f40' }, ticks: { color: '#6b7280', font: { size: 10 } } },
+        y: { grid: { color: '#2a2f40' }, ticks: { color: '#6b7280', font: { size: 10 }, callback: v => '₹'+v } }
+      }
+    }
+  });
+}
+
+function renderCatChart(cats) {
+  if (charts.cat) charts.cat.destroy();
+  const ctx = document.getElementById('catChart').getContext('2d');
+  if (!cats.length) return;
+  charts.cat = new Chart(ctx, {
+    type: 'doughnut',
+    data: {
+      labels: cats.map(c => c.icon + ' ' + c.name),
+      datasets: [{ data: cats.map(c => c.total), backgroundColor: cats.map(c => c.color || '#6366f1'), borderWidth: 0 }]
+    },
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      plugins: {
+        legend: { position: 'right', labels: { color: '#6b7280', font: { size: 11 }, boxWidth: 12, padding: 8 } }
+      }
+    }
+  });
+}
+
+function renderBudgetPace(budgets) {
+  const el = document.getElementById('budgetPace');
+  if (!budgets.length) { el.innerHTML = '<div class="empty"><div class="empty-icon">🎯</div>No budgets set. <a href="#" onclick="showPage(\'budgets\')">Set budgets →</a></div>'; return; }
+  el.innerHTML = budgets.slice(0, 6).map(b => `
+    <div class="budget-item">
+      <div class="budget-row">
+        <span>${b.category_icon || ''} ${b.category_name}</span>
+        <span style="color:var(--muted);font-size:12px">₹${fmt(b.spent)} / ₹${fmt(b.amount)}</span>
+      </div>
+      <div class="budget-bar-bg">
+        <div class="budget-bar-fill" style="width:${Math.min(b.pct,100)}%;background:${b.pct>100?'var(--red)':b.over_pace?'var(--yellow)':'var(--green)'}"></div>
+      </div>
+      ${b.over_pace ? `<div class="pace-warn">⚠️ Over daily pace by ₹${fmt(b.spent - b.expected_spent)}</div>` : ''}
+    </div>`).join('');
+}
+
+function renderRecentTxns(txns) {
+  const el = document.getElementById('recentTxns');
+  if (!txns.length) { el.innerHTML = '<div class="empty"><div class="empty-icon">💸</div>No transactions yet</div>'; return; }
+  el.innerHTML = txns.map(t => `
+    <div style="display:flex;justify-content:space-between;align-items:center;padding:10px 0;border-bottom:1px solid rgba(42,47,64,.5)">
+      <div style="display:flex;align-items:center;gap:10px">
+        <span style="font-size:20px">${t.category_icon || '💰'}</span>
+        <div>
+          <div style="font-size:13px;font-weight:500">${t.description}</div>
+          <div style="font-size:11px;color:var(--muted)">${t.date} · ${t.account_name || ''}</div>
+        </div>
+      </div>
+      <div class="amount-${t.type}">${t.type === 'expense' ? '-' : '+'}₹${fmt(t.amount)}</div>
+    </div>`).join('');
+}
+
+// ── Transactions ───────────────────────────────────────────────────────────
+async function loadTransactions() {
+  const acc = document.getElementById('filterAccount').value;
+  const cat = document.getElementById('filterCategory').value;
+  let url = `/api/transactions?month=${curMonth}&year=${curYear}&limit=${LIMIT}&offset=${txnPage * LIMIT}`;
+  if (acc) url += `&account_id=${acc}`;
+  if (cat) url += `&category_id=${cat}`;
+  const data = await api(url);
+  txnTotal = data.total;
+  const tbody = document.getElementById('txnTableBody');
+  const empty = document.getElementById('txnEmpty');
+  if (!data.items.length) {
+    tbody.innerHTML = ''; empty.style.display = 'block';
+  } else {
+    empty.style.display = 'none';
+    tbody.innerHTML = data.items.map(t => `
+      <tr>
+        <td style="color:var(--muted);font-size:12px">${t.date}</td>
+        <td>
+          <div style="font-weight:500">${t.description}</div>
+          ${t.note ? `<div style="font-size:11px;color:var(--muted)">${t.note}</div>` : ''}
+        </td>
+        <td>
+          ${t.category_name
+            ? `<span class="badge" style="background:${t.category_color}22;color:${t.category_color}">${t.category_icon} ${t.category_name}</span>`
+            : '<span style="color:var(--muted);font-size:12px">—</span>'}
+        </td>
+        <td>
+          <span class="badge" style="background:${t.account_color}22;color:${t.account_color}">${t.account_name}</span>
+        </td>
+        <td class="amount-${t.type}">${t.type === 'expense' ? '-' : '+'}₹${fmt(t.amount)}</td>
+        <td>
+          <button class="btn btn-danger btn-sm" onclick="deleteTxn(${t.id})">✕</button>
+        </td>
+      </tr>`).join('');
+  }
+  document.getElementById('txnCount').textContent = `${txnTotal} transactions`;
+}
+
+function prevPage() { if (txnPage > 0) { txnPage--; loadTransactions(); } }
+function nextPage() { if ((txnPage + 1) * LIMIT < txnTotal) { txnPage++; loadTransactions(); } }
+
+async function deleteTxn(id) {
+  if (!confirm('Delete this transaction?')) return;
+  await api(`/api/transactions/${id}`, 'DELETE');
+  toast('Deleted'); loadTransactions(); loadBase();
+}
+
+// ── Transaction Modal ──────────────────────────────────────────────────────
+function openAddTxn() {
+  document.getElementById('txnType').value = 'expense';
+  document.getElementById('txnAmount').value = '';
+  document.getElementById('txnDesc').value = '';
+  document.getElementById('txnNote').value = '';
+  document.getElementById('txnDate').value = new Date().toISOString().slice(0,10);
+  document.getElementById('txnCategory').value = '';
+  document.getElementById('toAccountRow').style.display = 'none';
+  openModal('txnModal');
+}
+
+document.getElementById('txnType').addEventListener('change', function() {
+  document.getElementById('toAccountRow').style.display = this.value === 'transfer' ? 'block' : 'none';
+});
+
+async function saveTxn() {
+  const amount = parseFloat(document.getElementById('txnAmount').value);
+  const desc = document.getElementById('txnDesc').value.trim();
+  const accId = parseInt(document.getElementById('txnAccount').value);
+  if (!amount || !desc || !accId) { toast('Fill required fields', 'error'); return; }
+  const body = {
+    amount, description: desc, type: document.getElementById('txnType').value,
+    date: document.getElementById('txnDate').value,
+    account_id: accId,
+    category_id: document.getElementById('txnCategory').value ? parseInt(document.getElementById('txnCategory').value) : null,
+    note: document.getElementById('txnNote').value || null,
+  };
+  if (body.type === 'transfer') body.to_account_id = parseInt(document.getElementById('txnToAccount').value);
+  await api('/api/transactions', 'POST', body);
+  closeModal('txnModal'); toast('Transaction saved ✓');
+  loadBase(); refreshCurrentPage();
+}
+
+// ── Accounts ───────────────────────────────────────────────────────────────
+async function loadAccounts() {
+  const el = document.getElementById('accountsGrid');
+  el.innerHTML = accounts.map(a => `
+    <div class="account-card" style="--acc-color:${a.color}">
+      <div class="acc-type-badge">${a.type.replace('_',' ')}</div>
+      <div class="acc-name">${a.name}</div>
+      <div class="acc-balance ${a.balance < 0 ? 'negative' : ''}">₹${fmt(a.balance)}</div>
+      ${a.monthly_emi ? `<div style="font-size:12px;color:var(--muted);margin-top:4px">EMI: ₹${fmt(a.monthly_emi)}/mo · Due: ${a.due_date}th</div>` : ''}
+      ${a.total_amount ? `<div style="margin-top:8px">
+        <div style="font-size:11px;color:var(--muted);margin-bottom:4px">₹${fmt(a.balance)} of ₹${fmt(a.total_amount)}</div>
+        <div class="nw-bar"><div class="nw-fill" style="width:${Math.min(Math.abs(a.balance/a.total_amount)*100,100)}%"></div></div>
+      </div>` : ''}
+      <div class="acc-actions">
+        <button class="btn btn-ghost btn-sm" onclick="editAccount(${a.id})">Edit</button>
+        <button class="btn btn-danger btn-sm" onclick="deleteAccount(${a.id})">Delete</button>
+      </div>
+    </div>`).join('');
+}
+
+function openAddAccount() {
+  document.getElementById('accountModalTitle').textContent = 'New Account';
+  document.getElementById('editAccountId').value = '';
+  document.getElementById('accName').value = '';
+  document.getElementById('accType').value = 'bank';
+  document.getElementById('accBalance').value = '';
+  document.getElementById('accColor').value = '#6366f1';
+  document.getElementById('accTotal').value = '';
+  document.getElementById('accEmi').value = '';
+  document.getElementById('accDue').value = '';
+  document.getElementById('accNotes').value = '';
+  document.getElementById('loanFields').style.display = 'none';
+  openModal('accountModal');
+}
+
+document.getElementById('accType').addEventListener('change', function() {
+  document.getElementById('loanFields').style.display = ['loan','chitty'].includes(this.value) ? 'block' : 'none';
+});
+
+function editAccount(id) {
+  const a = accounts.find(x => x.id === id);
+  if (!a) return;
+  document.getElementById('accountModalTitle').textContent = 'Edit Account';
+  document.getElementById('editAccountId').value = id;
+  document.getElementById('accName').value = a.name;
+  document.getElementById('accType').value = a.type;
+  document.getElementById('accBalance').value = a.balance;
+  document.getElementById('accColor').value = a.color;
+  document.getElementById('accTotal').value = a.total_amount || '';
+  document.getElementById('accEmi').value = a.monthly_emi || '';
+  document.getElementById('accDue').value = a.due_date || '';
+  document.getElementById('accNotes').value = a.notes || '';
+  document.getElementById('loanFields').style.display = ['loan','chitty'].includes(a.type) ? 'block' : 'none';
+  openModal('accountModal');
+}
+
+async function saveAccount() {
+  const name = document.getElementById('accName').value.trim();
+  const type = document.getElementById('accType').value;
+  if (!name) { toast('Enter account name', 'error'); return; }
+  const body = {
+    name, type,
+    balance: parseFloat(document.getElementById('accBalance').value) || 0,
+    color: document.getElementById('accColor').value,
+    currency: 'INR',
+    total_amount: parseFloat(document.getElementById('accTotal').value) || null,
+    monthly_emi: parseFloat(document.getElementById('accEmi').value) || null,
+    due_date: parseInt(document.getElementById('accDue').value) || null,
+    notes: document.getElementById('accNotes').value || null,
+  };
+  const editId = document.getElementById('editAccountId').value;
+  if (editId) await api(`/api/accounts/${editId}`, 'PUT', body);
+  else await api('/api/accounts', 'POST', body);
+  closeModal('accountModal'); toast('Account saved ✓');
+  await loadBase(); loadAccounts();
+}
+
+async function deleteAccount(id) {
+  if (!confirm('Delete this account?')) return;
+  await api(`/api/accounts/${id}`, 'DELETE');
+  toast('Deleted'); await loadBase(); loadAccounts();
+}
+
+// ── Budgets ────────────────────────────────────────────────────────────────
+async function loadBudgets() {
+  const budgets = await api(`/api/budgets?month=${curMonth}&year=${curYear}`);
+  const el = document.getElementById('budgetList');
+  if (!budgets.length) { el.innerHTML = '<div class="empty"><div class="empty-icon">🎯</div>No budgets for this month</div>'; return; }
+  el.innerHTML = `
+    <table style="width:100%">
+      <thead><tr>
+        <th>Category</th><th>Budget</th><th>Spent</th><th>Remaining</th><th>Pace</th>
+      </tr></thead>
+      <tbody>
+        ${budgets.map(b => `
+          <tr>
+            <td>${b.category_icon || ''} ${b.category_name}</td>
+            <td>₹${fmt(b.amount)}</td>
+            <td class="${b.pct > 100 ? 'amount-expense' : ''}">₹${fmt(b.spent)}</td>
+            <td class="${b.remaining < 0 ? 'amount-expense' : 'amount-income'}">₹${fmt(b.remaining)}</td>
+            <td>
+              <div style="display:flex;align-items:center;gap:8px">
+                <div style="width:80px;height:6px;background:var(--surface2);border-radius:3px;overflow:hidden">
+                  <div style="width:${Math.min(b.pct,100)}%;height:100%;background:${b.pct>100?'var(--red)':b.over_pace?'var(--yellow)':'var(--green)'};border-radius:3px"></div>
+                </div>
+                <span style="font-size:12px;color:var(--muted)">${b.pct}%</span>
+                ${b.over_pace ? '<span style="color:var(--yellow);font-size:12px">⚠️ over pace</span>' : ''}
+              </div>
+            </td>
+          </tr>`).join('')}
+      </tbody>
+    </table>`;
+}
+
+function openAddBudget() { openModal('budgetModal'); }
+
+async function saveBudget() {
+  const catId = parseInt(document.getElementById('budgetCategory').value);
+  const amount = parseFloat(document.getElementById('budgetAmount').value);
+  if (!catId || !amount) { toast('Fill all fields', 'error'); return; }
+  await api('/api/budgets', 'POST', { category_id: catId, month: curMonth, year: curYear, amount });
+  closeModal('budgetModal'); toast('Budget saved ✓'); loadBudgets();
+}
+
+// ── Lending ────────────────────────────────────────────────────────────────
+async function loadLending() {
+  let url = '/api/lending';
+  if (lendingFilter === 'settled') url += '?settled=true';
+  else if (lendingFilter !== 'all') url += '?settled=false';
+  const items = await api(url);
+  const filtered = lendingFilter === 'lent' ? items.filter(l => l.type === 'lent')
+    : lendingFilter === 'borrowed' ? items.filter(l => l.type === 'borrowed') : items;
+
+  const totalLent = filtered.filter(l => l.type === 'lent' && !l.is_settled).reduce((s, l) => s + l.outstanding, 0);
+  const totalBorrowed = filtered.filter(l => l.type === 'borrowed' && !l.is_settled).reduce((s, l) => s + l.outstanding, 0);
+
+  document.getElementById('lendingCards').innerHTML = `
+    <div class="card">
+      <div class="card-label">I'm Owed</div>
+      <div class="card-value accent">₹${fmt(totalLent)}</div>
+    </div>
+    <div class="card">
+      <div class="card-label">I Owe</div>
+      <div class="card-value" style="color:var(--yellow)">₹${fmt(totalBorrowed)}</div>
+    </div>
+    <div class="card">
+      <div class="card-label">Net</div>
+      <div class="card-value ${totalLent - totalBorrowed >= 0 ? 'green' : 'red'}">₹${fmt(totalLent - totalBorrowed)}</div>
+    </div>`;
+
+  const el = document.getElementById('lendingList');
+  if (!filtered.length) { el.innerHTML = '<div class="empty"><div class="empty-icon">🤝</div>No entries</div>'; return; }
+  el.innerHTML = filtered.map(l => `
+    <div class="lending-item ${l.is_settled ? 'opacity:.5' : ''}">
+      <div class="lending-left">
+        <div class="lending-name">${l.person_name}${l.is_settled ? ' ✓' : ''}</div>
+        <div class="lending-meta">
+          ${l.type === 'lent' ? '📤 I lent' : '📥 I borrowed'} · ${l.date}
+          ${l.due_date ? ` · Due: ${l.due_date}` : ''}
+          ${l.note ? ` · ${l.note}` : ''}
+        </div>
+        ${l.outstanding < l.amount ? `<div style="font-size:11px;color:var(--green);margin-top:3px">Partial: ₹${fmt(l.amount_settled)} settled</div>` : ''}
+      </div>
+      <div>
+        <div class="lending-amount ${l.type}">₹${fmt(l.outstanding)}</div>
+        ${!l.is_settled ? `<div style="display:flex;gap:6px;margin-top:8px;justify-content:flex-end">
+          <button class="btn btn-success btn-sm" onclick="openSettle(${l.id})">Settle</button>
+          <button class="btn btn-danger btn-sm" onclick="deleteLending(${l.id})">✕</button>
+        </div>` : ''}
+      </div>
+    </div>`).join('');
+}
+
+function switchLendingTab(filter, el) {
+  lendingFilter = filter;
+  document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+  el.classList.add('active');
+  loadLending();
+}
+
+function openAddLending() {
+  document.getElementById('lendDate').value = new Date().toISOString().slice(0,10);
+  openModal('lendingModal');
+}
+
+async function saveLending() {
+  const person = document.getElementById('lendPerson').value.trim();
+  const amount = parseFloat(document.getElementById('lendAmount').value);
+  if (!person || !amount) { toast('Fill required fields', 'error'); return; }
+  await api('/api/lending', 'POST', {
+    person_name: person, type: document.getElementById('lendType').value,
+    amount, date: document.getElementById('lendDate').value,
+    due_date: document.getElementById('lendDue').value || null,
+    note: document.getElementById('lendNote').value || null, is_settled: false,
+  });
+  closeModal('lendingModal'); toast('Entry saved ✓'); loadLending();
+}
+
+function openSettle(id) {
+  document.getElementById('settleLendId').value = id;
+  document.getElementById('settleAmount').value = '';
+  openModal('settleModal');
+}
+
+async function doSettle() {
+  const id = document.getElementById('settleLendId').value;
+  const amount = parseFloat(document.getElementById('settleAmount').value);
+  if (!amount) { toast('Enter amount', 'error'); return; }
+  await api(`/api/lending/${id}/settle?amount=${amount}`, 'PUT');
+  closeModal('settleModal'); toast('Settled ✓'); loadLending();
+}
+
+async function deleteLending(id) {
+  if (!confirm('Delete?')) return;
+  await api(`/api/lending/${id}`, 'DELETE');
+  toast('Deleted'); loadLending();
+}
+
+// ── Analytics ──────────────────────────────────────────────────────────────
+async function loadAnalytics() {
+  const [trend, summary] = await Promise.all([
+    api('/api/analytics/trend?months=6'),
+    api(`/api/analytics/summary?month=${curMonth}&year=${curYear}`),
+  ]);
+
+  if (charts.trend) charts.trend.destroy();
+  const ctx = document.getElementById('trendChart').getContext('2d');
+  charts.trend = new Chart(ctx, {
+    type: 'line',
+    data: {
+      labels: trend.map(t => t.month),
+      datasets: [
+        { label: 'Expense', data: trend.map(t => t.expense), borderColor: '#ef4444', backgroundColor: 'rgba(239,68,68,.1)', fill: true, tension: .4 },
+        { label: 'Income', data: trend.map(t => t.income), borderColor: '#22c55e', backgroundColor: 'rgba(34,197,94,.1)', fill: true, tension: .4 },
+      ]
+    },
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      plugins: { legend: { labels: { color: '#6b7280', font: { size: 11 } } } },
+      scales: {
+        x: { grid: { color: '#2a2f40' }, ticks: { color: '#6b7280' } },
+        y: { grid: { color: '#2a2f40' }, ticks: { color: '#6b7280', callback: v => '₹'+v } }
+      }
+    }
+  });
+
+  if (charts.acc) charts.acc.destroy();
+  const ctx2 = document.getElementById('accChart').getContext('2d');
+  charts.acc = new Chart(ctx2, {
+    type: 'bar',
+    data: {
+      labels: accounts.map(a => a.name),
+      datasets: [{
+        data: accounts.map(a => a.balance),
+        backgroundColor: accounts.map(a => a.color + 'aa'),
+        borderColor: accounts.map(a => a.color), borderWidth: 1, borderRadius: 4,
+      }]
+    },
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      plugins: { legend: { display: false } },
+      scales: {
+        x: { grid: { color: '#2a2f40' }, ticks: { color: '#6b7280', font: { size: 10 } } },
+        y: { grid: { color: '#2a2f40' }, ticks: { color: '#6b7280', callback: v => '₹'+v } }
+      }
+    }
+  });
+
+  const catEl = document.getElementById('catBreakdown');
+  if (!summary.by_category.length) { catEl.innerHTML = '<div class="empty">No data</div>'; return; }
+  const maxVal = summary.by_category[0].total;
+  catEl.innerHTML = `<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:16px;margin-top:8px">
+    ${summary.by_category.map(c => `
+      <div style="background:var(--surface2);border-radius:12px;padding:14px">
+        <div style="display:flex;justify-content:space-between;margin-bottom:8px">
+          <span>${c.icon} ${c.name}</span>
+          <span style="font-weight:700">₹${fmt(c.total)}</span>
+        </div>
+        <div class="budget-bar-bg">
+          <div class="budget-bar-fill" style="width:${(c.total/maxVal*100).toFixed(1)}%;background:${c.color || 'var(--accent)'}"></div>
+        </div>
+      </div>`).join('')}
+  </div>`;
+}
+
+// ── Utils ──────────────────────────────────────────────────────────────────
+function fmt(n) {
+  if (n === null || n === undefined) return '0';
+  return Math.abs(n).toLocaleString('en-IN', { minimumFractionDigits: 0, maximumFractionDigits: 0 });
+}
+
+function openModal(id) { document.getElementById(id).classList.add('open'); }
+function closeModal(id) { document.getElementById(id).classList.remove('open'); }
+
+// Close modal on overlay click
+document.querySelectorAll('.modal-overlay').forEach(overlay => {
+  overlay.addEventListener('click', e => {
+    if (e.target === overlay) overlay.classList.remove('open');
+  });
+});
+
+// ── Export ─────────────────────────────────────────────────────────────────
+function exportCSV() {
+  const a = document.createElement('a');
+  a.href = '/api/export/csv';
+  a.download = `paisa_export_${new Date().toISOString().slice(0,10)}.csv`;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  toast('Export started ✓');
+}
+
+// ── Logout ─────────────────────────────────────────────────────────────────
+async function logout() {
+  try {
+    await fetch('/api/auth/logout', { method: 'POST' });
+  } catch (_) {}
+  window.location.href = '/';
+}
+
+// ── Init ───────────────────────────────────────────────────────────────────
+(async () => {
+  await loadBase();
+  loadDashboard();
+})();
+</script>
+</body>
+</html>

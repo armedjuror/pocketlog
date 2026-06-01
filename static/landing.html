@@ -1,0 +1,379 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Hisaab — Know where every rupee goes</title>
+<link rel="icon" href="/static/favicon.svg" type="image/svg+xml">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Merriweather:ital,opsz,wght@0,18..144,300..900;1,18..144,300..900&family=DM+Sans:wght@300;400;500;600&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg:       #0d0f14;
+    --surface:  #161920;
+    --surface2: #1e2230;
+    --border:   #2a2f40;
+    --text:     #e8eaf0;
+    --muted:    #6b7280;
+    --accent:   rgba(152,117,63,1);
+    --accent2:  rgba(216,168,90,1);
+    --tg:       #2AABEE;
+    --tg-dark:  #1a8ec8;
+    --green:    #22c55e;
+    --radius:   14px;
+    --font-head: 'Merriweather', serif;
+    --font-body: 'DM Sans', sans-serif;
+  }
+
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: var(--font-body);
+    min-height: 100vh;
+    overflow-x: hidden;
+  }
+
+  /* ── Nav ─────────────────────────────────────────────────────── */
+  nav {
+    position: fixed; top: 0; left: 0; right: 0; z-index: 100;
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 18px 48px;
+    background: rgba(13,15,20,.85);
+    backdrop-filter: blur(12px);
+    border-bottom: 1px solid var(--border);
+  }
+  .nav-logo {
+    display: flex;
+    align-items: center;
+    text-decoration: none;
+  }
+  .nav-right { display: flex; gap: 12px; align-items: center; }
+  .nav-link {
+    color: var(--muted); font-size: 14px; font-weight: 500;
+    text-decoration: none; transition: color .18s;
+  }
+  .nav-link:hover { color: var(--text); }
+
+  /* ── Hero ────────────────────────────────────────────────────── */
+  .hero {
+    min-height: 100vh;
+    display: flex; flex-direction: column;
+    align-items: center; justify-content: center;
+    text-align: center;
+    padding: 120px 24px 80px;
+    position: relative;
+  }
+
+  /* Subtle radial glow */
+  .hero::before {
+    content: '';
+    position: absolute;
+    top: 0; left: 50%; transform: translateX(-50%);
+    width: 800px; height: 500px;
+    background: radial-gradient(ellipse at center top,
+      rgba(152,117,63,.13) 0%,
+      transparent 70%);
+    pointer-events: none;
+  }
+
+  .hero-badge {
+    display: inline-flex; align-items: center; gap: 8px;
+    background: var(--surface2); border: 1px solid var(--border);
+    border-radius: 999px; padding: 6px 16px;
+    font-size: 13px; color: var(--muted);
+    margin-bottom: 32px;
+  }
+  .hero-badge .dot {
+    width: 7px; height: 7px; border-radius: 50%;
+    background: var(--green);
+    box-shadow: 0 0 6px var(--green);
+  }
+
+  .hero h1 {
+    font-family: var(--font-head);
+    font-size: clamp(36px, 6vw, 68px);
+    font-weight: 900;
+    line-height: 1.12;
+    letter-spacing: -1.5px;
+    margin-bottom: 24px;
+    max-width: 800px;
+  }
+  .hero h1 em {
+    font-style: italic;
+    color: var(--accent2);
+  }
+
+  .hero-sub {
+    font-size: clamp(16px, 2vw, 19px);
+    color: var(--muted);
+    font-weight: 400;
+    line-height: 1.6;
+    max-width: 520px;
+    margin-bottom: 48px;
+  }
+
+  .cta-group { display: flex; gap: 14px; align-items: center; flex-wrap: wrap; justify-content: center; }
+
+  .btn-tg {
+    display: inline-flex; align-items: center; gap: 10px;
+    background: var(--tg); color: #fff;
+    font-family: var(--font-body); font-size: 15px; font-weight: 600;
+    padding: 14px 28px; border-radius: 12px;
+    text-decoration: none; border: none; cursor: pointer;
+    transition: background .18s, transform .12s, box-shadow .18s;
+    box-shadow: 0 4px 24px rgba(42,171,238,.25);
+  }
+  .btn-tg:hover {
+    background: var(--tg-dark);
+    transform: translateY(-1px);
+    box-shadow: 0 8px 32px rgba(42,171,238,.35);
+  }
+  .btn-tg:active { transform: translateY(0); }
+  .btn-tg svg { flex-shrink: 0; }
+
+  .btn-ghost-link {
+    color: var(--muted); font-size: 14px; font-weight: 500;
+    text-decoration: none; transition: color .18s;
+    display: inline-flex; align-items: center; gap: 6px;
+  }
+  .btn-ghost-link:hover { color: var(--text); }
+
+  /* ── How it works ────────────────────────────────────────────── */
+  .section { padding: 80px 24px; max-width: 1080px; margin: 0 auto; }
+  .section-label {
+    font-size: 12px; font-weight: 600; letter-spacing: 2px;
+    text-transform: uppercase; color: var(--accent);
+    margin-bottom: 16px; text-align: center;
+  }
+  .section-title {
+    font-family: var(--font-head);
+    font-size: clamp(24px, 4vw, 38px);
+    font-weight: 800; line-height: 1.2;
+    text-align: center; margin-bottom: 56px;
+    letter-spacing: -0.5px;
+  }
+
+  .steps {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+    gap: 2px;
+    background: var(--border);
+    border-radius: var(--radius);
+    overflow: hidden;
+  }
+  .step {
+    background: var(--surface);
+    padding: 32px 28px;
+    display: flex; flex-direction: column; gap: 14px;
+  }
+  .step-num {
+    width: 36px; height: 36px; border-radius: 50%;
+    background: var(--surface2); border: 1px solid var(--border);
+    display: flex; align-items: center; justify-content: center;
+    font-size: 13px; font-weight: 700; color: var(--accent2);
+  }
+  .step h3 { font-size: 16px; font-weight: 600; line-height: 1.3; }
+  .step p  { font-size: 14px; color: var(--muted); line-height: 1.6; }
+
+  /* ── Features ────────────────────────────────────────────────── */
+  .features {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+    gap: 16px;
+  }
+  .feature-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 28px;
+    transition: border-color .2s;
+  }
+  .feature-card:hover { border-color: var(--accent); }
+  .feature-icon { font-size: 28px; margin-bottom: 16px; }
+  .feature-card h3 { font-size: 16px; font-weight: 600; margin-bottom: 8px; }
+  .feature-card p  { font-size: 14px; color: var(--muted); line-height: 1.6; }
+
+  /* ── Bottom CTA ──────────────────────────────────────────────── */
+  .bottom-cta {
+    text-align: center;
+    padding: 80px 24px 100px;
+    background: linear-gradient(to bottom, transparent, rgba(152,117,63,.04));
+  }
+  .bottom-cta h2 {
+    font-family: var(--font-head);
+    font-size: clamp(22px, 4vw, 36px);
+    font-weight: 800; letter-spacing: -0.5px;
+    margin-bottom: 12px;
+  }
+  .bottom-cta p { color: var(--muted); font-size: 15px; margin-bottom: 36px; }
+
+  /* ── Footer ──────────────────────────────────────────────────── */
+  footer {
+    border-top: 1px solid var(--border);
+    padding: 24px 48px;
+    display: flex; align-items: center; justify-content: space-between;
+    flex-wrap: wrap; gap: 12px;
+  }
+  footer .logo { display: flex; align-items: center; }
+  footer p { font-size: 13px; color: var(--muted); }
+
+  /* ── Loading state ───────────────────────────────────────────── */
+  .btn-tg[disabled] { opacity: .5; pointer-events: none; }
+
+  @media (max-width: 600px) {
+    nav { padding: 16px 20px; }
+    .hero { padding: 100px 20px 60px; }
+    footer { padding: 20px; }
+  }
+</style>
+</head>
+<body>
+
+<!-- Nav -->
+<nav>
+  <a class="nav-logo" href="/"><img src="/static/logo.svg" alt="Hisaab" height="28"></a>
+  <div class="nav-right">
+    <a class="nav-link" href="/api/docs">API Docs</a>
+    <a class="nav-link" href="/app">Dashboard</a>
+  </div>
+</nav>
+
+<!-- Hero -->
+<section class="hero">
+  <div class="hero-badge">
+    <span class="dot"></span>
+    Track every expense — right from Telegram
+  </div>
+
+  <h1>Know where every<br><em>rupee</em> goes</h1>
+
+  <p class="hero-sub">
+    Hisaab is your personal finance assistant. Just message the bot — it logs your expenses, tracks budgets, and keeps your accounts in sync.
+  </p>
+
+  <div class="cta-group">
+    <a id="tg-btn" class="btn-tg" href="#" target="_blank" rel="noopener">
+      <svg width="22" height="22" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+        <path d="M12 0C5.373 0 0 5.373 0 12s5.373 12 12 12 12-5.373 12-12S18.627 0 12 0zm5.894 8.221-1.97 9.28c-.145.658-.537.818-1.084.508l-3-2.21-1.447 1.394c-.16.16-.295.295-.605.295l.213-3.053 5.56-5.023c.242-.213-.054-.333-.373-.12l-6.871 4.326-2.962-.924c-.643-.204-.657-.643.136-.953l11.57-4.461c.537-.194 1.006.131.833.941z" fill="white"/>
+      </svg>
+      <span id="tg-label">Login with Telegram</span>
+    </a>
+    <a class="btn-ghost-link" href="/app">
+      Open dashboard &rarr;
+    </a>
+  </div>
+</section>
+
+<!-- How it works -->
+<div class="section">
+  <p class="section-label">How it works</p>
+  <h2 class="section-title">Three messages to get started</h2>
+
+  <div class="steps">
+    <div class="step">
+      <div class="step-num">1</div>
+      <h3>Message the bot</h3>
+      <p>Open Hisaab on Telegram. It will ask for your name and email to create your account.</p>
+    </div>
+    <div class="step">
+      <div class="step-num">2</div>
+      <h3>Verify with OTP</h3>
+      <p>A one-time code is sent to confirm your identity. No passwords, ever.</p>
+    </div>
+    <div class="step">
+      <div class="step-num">3</div>
+      <h3>Start tracking</h3>
+      <p>Tell the bot what you spent — in plain language. It parses, categorises, and logs it instantly.</p>
+    </div>
+  </div>
+</div>
+
+<!-- Features -->
+<div class="section" style="padding-top: 0">
+  <p class="section-label">Features</p>
+  <h2 class="section-title">Everything you need, nothing you don't</h2>
+
+  <div class="features">
+    <div class="feature-card">
+      <div class="feature-icon">💬</div>
+      <h3>Natural language input</h3>
+      <p>Just say "spent 450 on lunch at HDFC" — the AI figures out the account, category, and amount.</p>
+    </div>
+    <div class="feature-card">
+      <div class="feature-icon">📊</div>
+      <h3>Budget tracking</h3>
+      <p>Set monthly budgets per category. Get warned when you're spending faster than planned.</p>
+    </div>
+    <div class="feature-card">
+      <div class="feature-icon">🏦</div>
+      <h3>Multiple accounts</h3>
+      <p>Bank, credit card, cash, wallets — balances stay in sync as you log transactions.</p>
+    </div>
+    <div class="feature-card">
+      <div class="feature-icon">🤝</div>
+      <h3>Lending tracker</h3>
+      <p>Track who owes you and who you owe, with settlement history.</p>
+    </div>
+    <div class="feature-card">
+      <div class="feature-icon">📈</div>
+      <h3>Spending trends</h3>
+      <p>Monthly summaries and 6-month trend charts so you can see patterns over time.</p>
+    </div>
+    <div class="feature-card">
+      <div class="feature-icon">📤</div>
+      <h3>CSV export</h3>
+      <p>Export all your data — transactions, accounts, budgets, and lending — any time.</p>
+    </div>
+  </div>
+</div>
+
+<!-- Bottom CTA -->
+<div class="bottom-cta">
+  <h2>Ready to take control?</h2>
+  <p>Start in under a minute — no app to install, no password to remember.</p>
+  <a id="tg-btn-2" class="btn-tg" href="#" target="_blank" rel="noopener">
+    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+      <path d="M12 0C5.373 0 0 5.373 0 12s5.373 12 12 12 12-5.373 12-12S18.627 0 12 0zm5.894 8.221-1.97 9.28c-.145.658-.537.818-1.084.508l-3-2.21-1.447 1.394c-.16.16-.295.295-.605.295l.213-3.053 5.56-5.023c.242-.213-.054-.333-.373-.12l-6.871 4.326-2.962-.924c-.643-.204-.657-.643.136-.953l11.57-4.461c.537-.194 1.006.131.833.941z" fill="white"/>
+    </svg>
+    Open Hisaab on Telegram
+  </a>
+</div>
+
+<!-- Footer -->
+<footer>
+  <span class="logo"><img src="/static/logo.svg" alt="Hisaab" height="22"></span>
+  <p>by <a href="https://makeyourreps.com" style="text-decoration: none;color: var(--accent)">Make Your Reps</a></p>
+</footer>
+
+<script>
+  // Fetch bot username from server config so the URL is never hardcoded here
+  (async () => {
+    try {
+      const res  = await fetch('/api/config');
+      const data = await res.json();
+      const bot  = data.telegram_bot;
+
+      if (bot) {
+        const url = `https://t.me/${bot.replace(/^@/, '')}`;
+        document.getElementById('tg-btn').href   = url;
+        document.getElementById('tg-btn-2').href = url;
+      } else {
+        // No bot configured — grey out the buttons
+        ['tg-btn', 'tg-btn-2'].forEach(id => {
+          const el = document.getElementById(id);
+          el.setAttribute('disabled', 'disabled');
+          el.style.pointerEvents = 'none';
+          el.style.opacity = '0.4';
+        });
+        document.getElementById('tg-label').textContent = 'Bot not configured';
+      }
+    } catch (e) {
+      console.error('Could not load config', e);
+    }
+  })();
+</script>
+
+</body>
+</html>

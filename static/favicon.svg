@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">
+  <!-- Background -->
+  <rect width="32" height="32" rx="7" fill="#0d0f14"/>
+  <!-- H — left bar -->
+  <rect x="6" y="7" width="4" height="18" rx="1.2" fill="#98753f"/>
+  <!-- H — right bar -->
+  <rect x="22" y="7" width="4" height="18" rx="1.2" fill="#98753f"/>
+  <!-- H — crossbar -->
+  <rect x="6" y="14" width="20" height="4" rx="1.2" fill="#98753f"/>
+  <!-- Accent dot (the "." in Hisaab.) -->
+  <circle cx="27" cy="25.5" r="2.2" fill="#d8a85a"/>
+</svg>
