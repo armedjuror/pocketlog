@@ -109,6 +109,178 @@ class BasePlugin(ABC):
             )
         return ""
 
+    def maybe_list_accounts(self, msg: InboundMessage, db) -> Optional[str]:  # noqa: F821
+        """
+        Check whether the message is asking to list accounts.
+        Returns a formatted string if yes, None otherwise.
+        """
+        import re
+        text = (msg.text or "").strip().lower()
+        if not re.search(
+            r"\baccounts?\b|/accounts",
+            text,
+        ):
+            return None
+
+        from services import get_accounts
+        accounts = get_accounts(db, user_id=msg.user_id)
+        if not accounts:
+            return "You have no accounts yet. Add one from the dashboard."
+
+        lines = ["*Your accounts:*\n"]
+        for a in accounts:
+            lines.append(f"  • *{a['name']}* ({a['type']}) — ₹{a['balance']:,.2f}")
+        return "\n".join(lines)
+
+    def maybe_list_categories(self, msg: InboundMessage, db) -> Optional[str]:  # noqa: F821
+        """Returns formatted category list if the message asks for categories, else None."""
+        import re
+        text = (msg.text or "").strip().lower()
+        if not re.search(r"\bcategor(y|ies)\b|/categories", text):
+            return None
+
+        from services import get_categories
+        cats = get_categories(db)
+        if not cats:
+            return "No categories found. Add some from the dashboard."
+
+        lines = ["*Categories:*\n"]
+        for c in cats:
+            lines.append(f"  {c['icon']}  {c['name']}")
+        return "\n".join(lines)
+
+    def maybe_get_today_spends(self, msg: InboundMessage, db) -> Optional[str]:  # noqa: F821
+        """Returns today's transactions if the message asks about today's spending, else None."""
+        import re
+        from datetime import date
+        text = (msg.text or "").strip().lower()
+        if "today" not in text:
+            return None
+        # Require clear query intent — avoid intercepting logging messages like "spent ₹500 today"
+        if not re.search(r"\b(what|show|list|how much|how many)\b|\?", text):
+            return None
+
+        today = date.today()
+        from services import list_transactions
+        txns = list_transactions(db, month=today.month, year=today.year, limit=500, user_id=msg.user_id)
+        today_txns = [t for t in txns if t["date"] == today.isoformat()]
+
+        if not today_txns:
+            return f"Nothing logged for today ({today.strftime('%b %d')}) yet."
+
+        total_expense = sum(t["amount"] for t in today_txns if t["type"] == "expense")
+        total_income  = sum(t["amount"] for t in today_txns if t["type"] == "income")
+
+        lines = [f"*Today ({today.strftime('%b %d')}):*\n"]
+        for t in today_txns:
+            prefix = "+" if t["type"] == "income" else "−"
+            cat = f"  _{t['category_name']}_" if t.get("category_name") else ""
+            lines.append(f"  {prefix}₹{t['amount']:,.0f} — {t['description']}{cat}")
+
+        summary = []
+        if total_expense:
+            summary.append(f"Spent: *₹{total_expense:,.0f}*")
+        if total_income:
+            summary.append(f"Received: *₹{total_income:,.0f}*")
+        if summary:
+            lines.append("\n" + "  |  ".join(summary))
+
+        return "\n".join(lines)
+
+    async def maybe_handle_lending(self, msg: InboundMessage, db) -> Optional[str]:  # noqa: F821
+        """
+        Detect and handle lending-related messages (log, list).
+        Returns a response string if handled, None if the message is not lending-related.
+        """
+        import re
+        text = (msg.text or "").strip().lower()
+        if not re.search(r'\b(lent|loaned|lend|borrowed|borrow|owe|owes|loan|debt|lending)\b', text):
+            return None
+
+        from services import parse_lending_with_ai, create_lending, list_lending
+        parsed = parse_lending_with_ai(msg.text or "")
+
+        if parsed.intent == "unknown":
+            return None
+
+        if parsed.intent == "log":
+            if parsed.missing:
+                return f"I need a bit more info: *{', '.join(parsed.missing)}*."
+            from datetime import date
+            create_lending(
+                db,
+                user_id      = msg.user_id,
+                person_name  = parsed.person,
+                type         = parsed.lending_type,
+                amount       = parsed.amount,
+                amount_settled = 0.0,
+                date         = parsed.date or date.today(),
+                note         = parsed.note,
+                is_settled   = False,
+            )
+            return parsed.reply or (
+                f"Logged: {'lent' if parsed.lending_type == 'lent' else 'borrowed'} "
+                f"*₹{parsed.amount:,.0f}* {'to' if parsed.lending_type == 'lent' else 'from'} *{parsed.person}*."
+            )
+
+        # List intents
+        records = list_lending(db, settled=False, user_id=msg.user_id)
+        if parsed.intent == "list_owed":
+            records = [r for r in records if r["type"] == "lent"]
+            header = "*People who owe you:*"
+        elif parsed.intent == "list_i_owe":
+            records = [r for r in records if r["type"] == "borrowed"]
+            header = "*You owe:*"
+        else:
+            header = "*Unsettled lending:*"
+
+        if not records:
+            return "Nothing outstanding."
+
+        lines = [f"{header}\n"]
+        total = 0.0
+        for r in records:
+            arrow = "→" if r["type"] == "lent" else "←"
+            lines.append(f"  {arrow} *{r['person_name']}*: ₹{r['outstanding']:,.0f}")
+            total += r["outstanding"]
+        lines.append(f"\n*Total: ₹{total:,.0f}*")
+        return "\n".join(lines)
+
+    def maybe_list_budgets(self, msg: InboundMessage, db) -> Optional[str]:  # noqa: F821
+        """Returns this month's budget summary if the message asks about budgets, else None."""
+        import re
+        from datetime import date
+        text = (msg.text or "").strip().lower()
+        if not re.search(r'\bbudgets?\b', text):
+            return None
+        if re.search(r'\b(set|create|add|update|change|put)\b', text):
+            return "Budget setting isn't supported here yet — use the dashboard to set budgets."
+
+        today = date.today()
+        from services import list_budgets
+        budgets = list_budgets(db, today.month, today.year, user_id=msg.user_id)
+
+        if not budgets:
+            return f"No budgets set for {today.strftime('%B %Y')}. Add them from the dashboard."
+
+        lines = [f"*Budgets — {today.strftime('%B %Y')}:*\n"]
+        for b in budgets:
+            icon    = b.get("category_icon", "💰")
+            name    = b.get("category_name", "")
+            spent   = b.get("spent", 0) or 0
+            total   = b.get("budget_amount") or b.get("amount") or 0
+            remaining = b.get("remaining", total - spent)
+            pct     = round(spent / total * 100) if total else 0
+            filled  = min(10, pct // 10)
+            bar     = "█" * filled + "░" * (10 - filled)
+            status  = "⚠️" if pct >= 90 else ("🔶" if pct >= 70 else "✅")
+            lines.append(
+                f"  {status} {icon} *{name}*\n"
+                f"     {bar} {pct}%\n"
+                f"     ₹{spent:,.0f} of ₹{total:,.0f}  (₹{remaining:,.0f} left)"
+            )
+        return "\n".join(lines)
+
     async def maybe_get_report(self, msg: InboundMessage, db) -> Optional[str]:
         """
         Check whether the message is asking for an analytics report.

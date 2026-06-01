@@ -228,6 +228,30 @@ def create_transaction(
     )
 
 
+@router.put("/transactions/{tid}", summary="Update a transaction")
+def update_transaction(
+    tid:  int,
+    data: TransactionIn,
+    user: User    = Depends(current_user),
+    db:   Session = Depends(get_db),
+):
+    """Update an existing transaction. Account balances are recalculated automatically."""
+    try:
+        return services.update_transaction(
+            db, tid,
+            amount        = data.amount,
+            description   = data.description,
+            date          = data.date,
+            account_id    = data.account_id,
+            type          = data.type.value,
+            category_id   = data.category_id,
+            to_account_id = data.to_account_id,
+            note          = data.note,
+        )
+    except ValueError as e:
+        raise HTTPException(404, str(e))
+
+
 @router.delete("/transactions/{tid}", summary="Delete a transaction")
 def delete_transaction(
     tid:  int,

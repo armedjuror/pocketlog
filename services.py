@@ -39,6 +39,19 @@ class ParsedTransaction:
 
 
 @dataclass
+class ParsedLending:
+    """Result of AI lending parser."""
+    intent:       str            = "unknown"   # log | list_owed | list_i_owe | list_all
+    lending_type: Optional[str]  = None        # lent | borrowed
+    person:       Optional[str]  = None
+    amount:       Optional[float]= None
+    date:         Optional[date] = None
+    note:         Optional[str]  = None
+    missing:      list[str]      = field(default_factory=list)
+    reply:        str            = ""
+
+
+@dataclass
 class BudgetStatus:
     budget_amount:   float
     spent:           float
@@ -91,6 +104,13 @@ def delete_account(db: Session, account_id: int) -> None:
 
 
 def _account_dict(a: Account) -> dict:
+    # For credit cards: outstanding = amount owed (balance goes negative when spending)
+    outstanding     = round(max(0.0, -a.balance), 2) if a.type == AccountType.credit_card else None
+    available_credit = (
+        round(a.credit_limit - outstanding, 2)
+        if a.credit_limit is not None and outstanding is not None
+        else None
+    )
     return {
         "id": a.id, "name": a.name, "type": a.type,
         "balance": a.balance, "currency": a.currency,
@@ -98,6 +118,11 @@ def _account_dict(a: Account) -> dict:
         "monthly_emi": a.monthly_emi, "due_date": a.due_date,
         "notes": a.notes, "is_active": a.is_active,
         "created_at": str(a.created_at),
+        # Credit card fields
+        "credit_limit":             a.credit_limit,
+        "shared_limit_account_id":  a.shared_limit_account_id,
+        "outstanding":              outstanding,
+        "available_credit":         available_credit,
     }
 
 
@@ -168,6 +193,37 @@ def create_transaction(
         user_id=user_id,
     )
     db.add(txn)
+    _apply_balance(db, txn, reverse=False)
+    db.commit()
+    db.refresh(txn)
+    return _txn_dict(txn)
+
+
+def update_transaction(
+    db: Session,
+    transaction_id: int,
+    amount: float,
+    description: str,
+    date,
+    account_id: int,
+    type: str = "expense",
+    category_id: Optional[int] = None,
+    to_account_id: Optional[int] = None,
+    note: Optional[str] = None,
+) -> dict:
+    txn = db.query(Transaction).get(transaction_id)
+    if not txn:
+        raise ValueError(f"Transaction {transaction_id} not found")
+    # Reverse old balance effect, apply new one
+    _apply_balance(db, txn, reverse=True)
+    txn.amount = amount
+    txn.description = description
+    txn.date = date
+    txn.account_id = account_id
+    txn.type = TransactionType(type)
+    txn.category_id = category_id
+    txn.to_account_id = to_account_id
+    txn.note = note
     _apply_balance(db, txn, reverse=False)
     db.commit()
     db.refresh(txn)
@@ -376,11 +432,56 @@ def monthly_summary(db: Session, month: int, year: int, user_id: Optional[int] =
         daily_q = daily_q.filter(Transaction.user_id == user_id)
     daily = daily_q.group_by(Transaction.date).order_by(Transaction.date).all()
 
+    from sqlalchemy import or_
     nw_q = db.query(func.sum(Account.balance)).filter(Account.is_active == True)
     if user_id is not None:
-        from sqlalchemy import or_
         nw_q = nw_q.filter(or_(Account.user_id == None, Account.user_id == user_id))
     net_worth = nw_q.scalar() or 0
+
+    # ── Credit card breakdown ───────────────────────────────────────────────
+    cc_q = db.query(Account).filter(
+        Account.type == AccountType.credit_card,
+        Account.is_active == True,
+    )
+    if user_id is not None:
+        cc_q = cc_q.filter(or_(Account.user_id == None, Account.user_id == user_id))
+    all_cc = cc_q.all()
+
+    # Add-on cards (those sharing another card's limit) are merged into their primary
+    addon_ids = {cc.id for cc in all_cc if cc.shared_limit_account_id}
+    cc_summary = []
+    for cc in all_cc:
+        if cc.id in addon_ids:
+            continue   # shown under primary
+
+        addons        = [c for c in all_cc if c.shared_limit_account_id == cc.id]
+        all_in_group  = [cc] + addons
+        outstanding   = round(sum(max(0.0, -c.balance) for c in all_in_group), 2)
+        limit         = cc.credit_limit
+        available     = round(limit - outstanding, 2) if limit is not None else None
+        util_pct      = round(outstanding / limit * 100, 1) if limit else None
+
+        # This month's spend on all cards in the group
+        month_spend_q = (
+            db.query(func.sum(Transaction.amount))
+            .filter(
+                Transaction.account_id.in_([c.id for c in all_in_group]),
+                Transaction.type == TransactionType.expense,
+                extract("month", Transaction.date) == month,
+                extract("year",  Transaction.date) == year,
+            )
+        )
+        month_spend = round(month_spend_q.scalar() or 0, 2)
+
+        cc_summary.append({
+            "name":         cc.name,
+            "cards":        [c.name for c in all_in_group],
+            "outstanding":  outstanding,
+            "month_spend":  month_spend,
+            "credit_limit": limit,
+            "available":    available,
+            "util_pct":     util_pct,
+        })
 
     return {
         "total_expense":  round(total_expense, 2),
@@ -389,6 +490,7 @@ def monthly_summary(db: Session, month: int, year: int, user_id: Optional[int] =
         "net_worth":      round(net_worth, 2),
         "by_category":    [{"name": r[0], "icon": r[1], "color": r[2], "total": round(r[3], 2)} for r in by_cat],
         "daily":          [{"date": str(r[0]), "total": round(r[1], 2)} for r in daily],
+        "credit_cards":   cc_summary,
     }
 
 
@@ -496,6 +598,29 @@ def export_csv(db: Session, user_id: Optional[int] = None) -> str:
     return out.getvalue()
 
 
+# ── Audio transcription ───────────────────────────────────────────────────
+
+_whisper_model = None
+
+def transcribe_audio(file_path: str) -> str:
+    """Transcribe an audio file using local Whisper (base model, lazy-loaded)."""
+    global _whisper_model
+    import whisper
+    if _whisper_model is None:
+        _whisper_model = whisper.load_model("base")
+    result = _whisper_model.transcribe(file_path)
+    return result["text"].strip()
+
+
+def ocr_image(file_path: str) -> str:
+    """Extract text from a receipt/invoice image using local Tesseract OCR."""
+    import pytesseract
+    from PIL import Image
+    img = Image.open(file_path)
+    # PSM 6 = assume a single uniform block of text (good for receipts)
+    return pytesseract.image_to_string(img, config="--psm 6").strip()
+
+
 # ── AI parsing (shared across all plugins) ────────────────────────────────
 
 def parse_message_with_ai(
@@ -563,6 +688,72 @@ User message: {text}"""
         note        = data.get("note"),
         missing     = data.get("missing", []),
         reply       = data.get("reply", ""),
+    )
+
+
+def parse_lending_with_ai(text: str, today: Optional[date] = None) -> ParsedLending:
+    """
+    Detect and parse lending-related messages.
+    Returns a ParsedLending with intent=unknown if the message is not about lending.
+    """
+    import json
+    from litellm import completion
+
+    today_str = (today or date.today()).isoformat()
+
+    prompt = f"""You are a lending/loan tracker. Classify the user's message and extract details.
+
+Intents:
+- "log"         — user is recording that they lent or borrowed money
+- "list_owed"   — user wants to see who owes them money
+- "list_i_owe"  — user wants to see what they owe others
+- "list_all"    — user wants to see all lending records
+- "unknown"     — not related to lending/loans
+
+Return ONLY a JSON object:
+{{
+  "intent":       "log" | "list_owed" | "list_i_owe" | "list_all" | "unknown",
+  "lending_type": "lent" | "borrowed" | null,
+  "person":       <string or null>,
+  "amount":       <number or null>,
+  "date":         "<YYYY-MM-DD>" or null,
+  "note":         <string or null>,
+  "missing":      ["person"|"amount"|"lending_type"],
+  "reply":        "<friendly 1-line confirmation, or null if not a log>"
+}}
+
+Rules:
+- "lent/loaned/gave X to Y" → intent=log, lending_type=lent
+- "borrowed/took X from Y" → intent=log, lending_type=borrowed
+- "who owes me / what's due to me" → intent=list_owed
+- "what do I owe / my debts / whom do I owe" → intent=list_i_owe
+- "show all lending / loans" → intent=list_all
+- Default date to today if not mentioned.
+
+Today: {today_str}
+User message: {text}"""
+
+    resp = completion(
+        model="anthropic/claude-haiku-4-5",
+        messages=[{"role": "user", "content": prompt}],
+        max_tokens=300,
+    )
+    raw = resp.choices[0].message.content.strip()
+    if raw.startswith("```"):
+        raw = raw.split("```")[1]
+        if raw.startswith("json"):
+            raw = raw[4:]
+    data = json.loads(raw.strip())
+
+    return ParsedLending(
+        intent       = data.get("intent", "unknown"),
+        lending_type = data.get("lending_type"),
+        person       = data.get("person"),
+        amount       = data.get("amount"),
+        date         = date.fromisoformat(data["date"]) if data.get("date") else (today or date.today()),
+        note         = data.get("note"),
+        missing      = data.get("missing", []),
+        reply        = data.get("reply") or "",
     )
 
 
@@ -679,6 +870,18 @@ def format_monthly_report(summary: dict, month: int, year: int) -> str:
         peak  = max(days, key=lambda d: d["total"])
         lines.append(f"\n📅 Daily avg:  ₹{avg:,.0f}")
         lines.append(f"📌 Peak day:   {peak['date']}  ₹{peak['total']:,.0f}")
+
+    if summary.get("credit_cards"):
+        lines.append("\n💳 *Credit cards:*")
+        for cc in summary["credit_cards"]:
+            card_label = " + ".join(cc["cards"]) if len(cc["cards"]) > 1 else cc["name"]
+            lines.append(f"  *{card_label}*")
+            lines.append(f"    Spent this month: ₹{cc['month_spend']:,.0f}")
+            lines.append(f"    Outstanding:      ₹{cc['outstanding']:,.0f}")
+            if cc.get("credit_limit"):
+                util = f"  ({cc['util_pct']}% used)" if cc.get("util_pct") is not None else ""
+                lines.append(f"    Limit:            ₹{cc['credit_limit']:,.0f}{util}")
+                lines.append(f"    Available:        ₹{cc['available']:,.0f}")
 
     return "\n".join(lines)
 

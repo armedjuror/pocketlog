@@ -52,25 +52,88 @@ class TelegramPlugin(AuthFlowMixin, BasePlugin):
         return "telegram"
 
     def welcome_text(self, user) -> str:
+        return f"👋 Welcome, *{user.name}*!\nLogged in as `{user.email}`\n\n" + self._help_text()
+
+    @staticmethod
+    def _help_text() -> str:
         return (
-            f"👋 Welcome, *{user.name}*!\n"
-            f"Logged in as `{user.email}`\n\n"
-            "Just send me what you spent — in plain language — and I'll log it.\n\n"
-            "*Logging examples:*\n"
+            "*Expenses & income* — text or 🎙️ voice note:\n"
             "  `spent 450 on lunch`\n"
-            "  `paid 1200 electricity bill from HDFC`\n"
+            "  `paid 1200 electricity from HDFC`\n"
             "  `got salary 85000`\n\n"
+            "*Lending:*\n"
+            "  `lent 2000 to Rahul`\n"
+            "  `borrowed 5000 from Priya`\n"
+            "  `who owes me` — unsettled lent amounts\n"
+            "  `what do I owe` — unsettled borrowed amounts\n\n"
+            "*Quick queries:*\n"
+            "  `my accounts` — balances\n"
+            "  `my categories` — list categories\n"
+            "  `my budgets` — this month's budget progress\n"
+            "  `what did I spend today`\n\n"
             "*Reports:*\n"
             "  /report — this month's summary\n"
             "  /report last — last month\n"
-            "  /report jan — January (add year for past: `jan 2024`)\n"
-            "  /report trend — 6-month spending trend\n"
-            "  /report trend 3 — last 3 months\n\n"
+            "  /report jan — January (add year: `jan 2024`)\n"
+            "  /report trend — 6-month spending trend\n\n"
             "*Account:*\n"
             "  /login — request a new login code\n"
             "  /login list — show your linked bots\n"
             "  /apikey — get your API access token\n"
+            "  /help — show this message\n"
         )
+
+    async def _get_file_path(self, file_id: str) -> str | None:
+        """Resolve a Telegram file_id to a direct download URL."""
+        if not self._token:
+            return None
+        async with httpx.AsyncClient() as client:
+            r = await client.get(
+                f"https://api.telegram.org/bot{self._token}/getFile",
+                params={"file_id": file_id},
+                timeout=10,
+            )
+            data = r.json()
+            if data.get("ok") and data["result"].get("file_path"):
+                return f"https://api.telegram.org/file/bot{self._token}/{data['result']['file_path']}"
+        return None
+
+    async def transcribe_voice(self, file_id: str) -> str | None:
+        """Download a Telegram voice/audio file and transcribe it with Whisper."""
+        import tempfile, os
+        url = await self._get_file_path(file_id)
+        if not url:
+            return None
+        async with httpx.AsyncClient() as client:
+            r = await client.get(url, timeout=60)
+            r.raise_for_status()
+        suffix = ".oga" if ".oga" in url else ".mp3" if ".mp3" in url else ".ogg"
+        with tempfile.NamedTemporaryFile(suffix=suffix, delete=False) as f:
+            f.write(r.content)
+            tmp_path = f.name
+        try:
+            from services import transcribe_audio
+            return transcribe_audio(tmp_path)
+        finally:
+            os.unlink(tmp_path)
+
+    async def ocr_photo(self, file_id: str) -> str | None:
+        """Download a Telegram photo and extract text via local Tesseract OCR."""
+        import tempfile, os
+        url = await self._get_file_path(file_id)
+        if not url:
+            return None
+        async with httpx.AsyncClient() as client:
+            r = await client.get(url, timeout=60)
+            r.raise_for_status()
+        with tempfile.NamedTemporaryFile(suffix=".jpg", delete=False) as f:
+            f.write(r.content)
+            tmp_path = f.name
+        try:
+            from services import ocr_image
+            return ocr_image(tmp_path)
+        finally:
+            os.unlink(tmp_path)
 
     async def send_message(self, chat_id: str, text: str) -> None:
         if not self._token:
@@ -94,6 +157,11 @@ class TelegramPlugin(AuthFlowMixin, BasePlugin):
 
         text = (msg.text or "").strip()
 
+        # ── /help ─────────────────────────────────────────────────────────
+        if text.lower() == "/help":
+            await self.send_message(msg.chat_id, self._help_text())
+            return
+
         # ── /apikey — return the user's Personal Access Token ─────────────
         if text.lower() == "/apikey":
             import oauth_service as _oas
@@ -106,8 +174,77 @@ class TelegramPlugin(AuthFlowMixin, BasePlugin):
             )
             return
 
+        # ── Voice / audio note? Transcribe with Whisper ───────────────────
+        if not msg.text and msg.raw:
+            message = msg.raw.get("message", {})
+            voice = message.get("voice") or message.get("audio")
+            if voice:
+                await self.send_message(msg.chat_id, "🎙️ Transcribing your voice note…")
+                try:
+                    transcript = await self.transcribe_voice(voice["file_id"])
+                    if transcript:
+                        msg.text = transcript
+                        log.info("Voice transcribed: %s", transcript)
+                    else:
+                        await self.send_message(msg.chat_id, "Couldn't transcribe the audio. Please try again.")
+                        return
+                except Exception:
+                    log.exception("Voice transcription failed")
+                    await self.send_message(msg.chat_id, "Voice transcription failed. Send a text message instead.")
+                    return
+
+        # ── Photo/invoice image? OCR with Tesseract ──────────────────────
+        if not msg.text and msg.raw:
+            photo = msg.raw.get("message", {}).get("photo", [])
+            if photo:
+                await self.send_message(msg.chat_id, "🔍 Reading your invoice…")
+                try:
+                    ocr_text = await self.ocr_photo(photo[-1]["file_id"])
+                    if ocr_text:
+                        caption = msg.raw.get("message", {}).get("caption", "")
+                        msg.text = (caption + "
+" + ocr_text).strip() if caption else ocr_text
+                        log.info("OCR extracted: %s", msg.text[:100])
+                    else:
+                        await self.send_message(msg.chat_id, "Couldn't read the image. Try typing the amount instead.")
+                        return
+                except Exception:
+                    log.exception("OCR failed")
+                    await self.send_message(msg.chat_id, "Image reading failed. Send a text message instead.")
+                    return
+
         if not msg.text:
-            await self.send_message(msg.chat_id, "Send me a text message describing your expense.")
+            await self.send_message(msg.chat_id, "Send me a text message, a voice note, or a photo of your receipt.")
+            return
+
+        # ── Account list? ─────────────────────────────────────────────────
+        accounts_reply = self.maybe_list_accounts(msg, db)
+        if accounts_reply is not None:
+            await self.send_message(msg.chat_id, accounts_reply)
+            return
+
+        # ── Category list? ────────────────────────────────────────────────
+        categories_reply = self.maybe_list_categories(msg, db)
+        if categories_reply is not None:
+            await self.send_message(msg.chat_id, categories_reply)
+            return
+
+        # ── Budget summary? ───────────────────────────────────────────────
+        budget_reply = self.maybe_list_budgets(msg, db)
+        if budget_reply is not None:
+            await self.send_message(msg.chat_id, budget_reply)
+            return
+
+        # ── Today's spends? ───────────────────────────────────────────────
+        today_reply = self.maybe_get_today_spends(msg, db)
+        if today_reply is not None:
+            await self.send_message(msg.chat_id, today_reply)
+            return
+
+        # ── Lending? ──────────────────────────────────────────────────────
+        lending_reply = await self.maybe_handle_lending(msg, db)
+        if lending_reply is not None:
+            await self.send_message(msg.chat_id, lending_reply)
             return
 
         # ── Report request? ───────────────────────────────────────────────

@@ -190,15 +190,17 @@ def logout(response: Response):
 # ── Pydantic schemas ───────────────────────────────────────────────────────
 
 class AccountIn(BaseModel):
-    name:         str
-    type:         AccountType
-    balance:      float = 0.0
-    currency:     str   = "INR"
-    color:        str   = "#6366f1"
-    total_amount: Optional[float] = None
-    monthly_emi:  Optional[float] = None
-    due_date:     Optional[int]   = None
-    notes:        Optional[str]   = None
+    name:                    str
+    type:                    AccountType
+    balance:                 float = 0.0
+    currency:                str   = "INR"
+    color:                   str   = "#6366f1"
+    total_amount:            Optional[float] = None
+    monthly_emi:             Optional[float] = None
+    due_date:                Optional[int]   = None
+    notes:                   Optional[str]   = None
+    credit_limit:            Optional[float] = None
+    shared_limit_account_id: Optional[int]   = None
 
 
 class CategoryIn(BaseModel):
@@ -308,6 +310,24 @@ def create_transaction(data: TransactionIn, db: Session = Depends(get_db)):
         note          = data.note,
         source_plugin = "web",
     )
+
+
+@app.put("/api/transactions/{tid}", include_in_schema=False)
+def update_transaction(tid: int, data: TransactionIn, db: Session = Depends(get_db)):
+    try:
+        return services.update_transaction(
+            db, tid,
+            amount        = data.amount,
+            description   = data.description,
+            date          = data.date,
+            account_id    = data.account_id,
+            type          = data.type.value,
+            category_id   = data.category_id,
+            to_account_id = data.to_account_id,
+            note          = data.note,
+        )
+    except ValueError as e:
+        raise HTTPException(404, str(e))
 
 
 @app.delete("/api/transactions/{tid}", include_in_schema=False)

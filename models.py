@@ -155,10 +155,17 @@ class Account(Base):
     monthly_emi  = Column(Float, nullable=True)
     due_date     = Column(Integer, nullable=True)   # day-of-month
     notes        = Column(Text, nullable=True)
+    # Credit card extras
+    credit_limit            = Column(Float,   nullable=True)   # the card's own limit (or pool limit if primary)
+    shared_limit_account_id = Column(Integer, ForeignKey("accounts.id"), nullable=True)   # FK to primary card
 
     transactions = relationship(
         "Transaction", back_populates="account",
         foreign_keys="Transaction.account_id"
+    )
+    shared_limit_cards = relationship(
+        "Account", foreign_keys="Account.shared_limit_account_id",
+        backref="shared_limit_primary"
     )
 
 
@@ -259,7 +266,19 @@ def init_db():
 
 
 def _seed(eng):
+    from sqlalchemy import text, inspect as sql_inspect
     from sqlalchemy.orm import Session
+    # ── Inline column migrations (idempotent) ───────────────────────────────
+    inspector = sql_inspect(eng)
+    existing_cols = {c["name"] for c in inspector.get_columns("accounts")}
+    with eng.begin() as conn:
+        if "credit_limit" not in existing_cols:
+            conn.execute(text("ALTER TABLE accounts ADD COLUMN credit_limit FLOAT"))
+        if "shared_limit_account_id" not in existing_cols:
+            conn.execute(text(
+                "ALTER TABLE accounts ADD COLUMN shared_limit_account_id INTEGER"
+                " REFERENCES accounts(id)"
+            ))
     with Session(eng) as s:
         if s.query(Category).count() == 0:
             s.add_all([

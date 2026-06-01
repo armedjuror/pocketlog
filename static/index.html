@@ -365,11 +365,12 @@
 <!-- Toast -->
 <div id="toast"></div>
 
-<!-- ADD TRANSACTION MODAL -->
+<!-- ADD / EDIT TRANSACTION MODAL -->
 <div class="modal-overlay" id="txnModal">
   <div class="modal">
     <button class="close-btn" onclick="closeModal('txnModal')">×</button>
     <h2 id="txnModalTitle">Add Transaction</h2>
+    <input type="hidden" id="editTxnId">
     <div class="form-row">
       <label>Type</label>
       <select id="txnType">
@@ -791,7 +792,8 @@ async function loadTransactions() {
           <span class="badge" style="background:${t.account_color}22;color:${t.account_color}">${t.account_name}</span>
         </td>
         <td class="amount-${t.type}">${t.type === 'expense' ? '-' : '+'}₹${fmt(t.amount)}</td>
-        <td>
+        <td style="white-space:nowrap">
+          <button class="btn btn-ghost btn-sm" onclick='openEditTxn(${JSON.stringify(t)})' style="margin-right:4px">✎</button>
           <button class="btn btn-danger btn-sm" onclick="deleteTxn(${t.id})">✕</button>
         </td>
       </tr>`).join('');
@@ -810,6 +812,8 @@ async function deleteTxn(id) {
 
 // ── Transaction Modal ──────────────────────────────────────────────────────
 function openAddTxn() {
+  document.getElementById('txnModalTitle').textContent = 'Add Transaction';
+  document.getElementById('editTxnId').value = '';
   document.getElementById('txnType').value = 'expense';
   document.getElementById('txnAmount').value = '';
   document.getElementById('txnDesc').value = '';
@@ -817,6 +821,21 @@ function openAddTxn() {
   document.getElementById('txnDate').value = new Date().toISOString().slice(0,10);
   document.getElementById('txnCategory').value = '';
   document.getElementById('toAccountRow').style.display = 'none';
+  openModal('txnModal');
+}
+
+function openEditTxn(t) {
+  document.getElementById('txnModalTitle').textContent = 'Edit Transaction';
+  document.getElementById('editTxnId').value = t.id;
+  document.getElementById('txnType').value = t.type;
+  document.getElementById('txnAmount').value = t.amount;
+  document.getElementById('txnDesc').value = t.description;
+  document.getElementById('txnNote').value = t.note || '';
+  document.getElementById('txnDate').value = t.date;
+  document.getElementById('txnAccount').value = t.account_id;
+  document.getElementById('txnCategory').value = t.category_id || '';
+  document.getElementById('toAccountRow').style.display = t.type === 'transfer' ? 'block' : 'none';
+  if (t.to_account_id) document.getElementById('txnToAccount').value = t.to_account_id;
   openModal('txnModal');
 }
 
@@ -837,8 +856,10 @@ async function saveTxn() {
     note: document.getElementById('txnNote').value || null,
   };
   if (body.type === 'transfer') body.to_account_id = parseInt(document.getElementById('txnToAccount').value);
-  await api('/api/transactions', 'POST', body);
-  closeModal('txnModal'); toast('Transaction saved ✓');
+  const editId = document.getElementById('editTxnId').value;
+  if (editId) await api(`/api/transactions/${editId}`, 'PUT', body);
+  else await api('/api/transactions', 'POST', body);
+  closeModal('txnModal'); toast(editId ? 'Transaction updated ✓' : 'Transaction saved ✓');
   loadBase(); refreshCurrentPage();
 }
 

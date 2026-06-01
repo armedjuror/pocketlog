@@ -93,6 +93,20 @@ def verify_otp(user_id: int, code: str, db: Session) -> Optional[UserSession]:
 
 # ── Session ────────────────────────────────────────────────────────────────
 
+def create_session(user_id: int, db: Session) -> UserSession:
+    """Create a session directly — no OTP required (used for bot signups)."""
+    token = secrets.token_hex(32)
+    session = UserSession(
+        user_id=user_id,
+        token=token,
+        expires_at=datetime.utcnow() + timedelta(days=SESSION_EXPIRY_DAYS),
+    )
+    db.add(session)
+    db.commit()
+    db.refresh(session)
+    return session
+
+
 def get_active_session_by_bot(platform: str, chat_id: str, db: Session) -> Optional[UserSession]:
     identity = (
         db.query(BotIdentity)

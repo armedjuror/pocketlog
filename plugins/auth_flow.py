@@ -167,18 +167,14 @@ class AuthFlowMixin:
                 existing_user, email, platform, chat_id, state_row, db
             )
 
-        # Fresh signup
+        # Fresh signup — already verified by being in this bot, no OTP needed
         name = state_row.temp_name or "User"
         user = auth_service.create_user(name=name, email=email, primary_bot=platform, db=db)
         auth_service.link_bot_identity(user.id, platform, chat_id, db)
-
-        otp = auth_service.generate_otp(user.id, db)
-        await self.send_message(
-            chat_id,
-            f"Account created!\n\nYour login code is:\n\n*{otp}*\n\nIt expires in 10 minutes.",
-        )
-        auth_service.set_bot_state(platform, chat_id, "awaiting_otp", db, user_id=user.id)
-        return None
+        auth_service.create_session(user.id, db)
+        auth_service.clear_bot_state(platform, chat_id, db)
+        await self.send_message(chat_id, self.welcome_text(user))
+        return user
 
     async def _handle_otp(
         self, msg: InboundMessage, db: Session, state_row
