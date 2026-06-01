@@ -36,6 +36,21 @@ from plugins.base import InboundMessage
 from plugins import SUPPORTED_PLUGINS
 
 
+_TYPE_COLORS = {
+    "bank":        "#3b82f6",  # blue
+    "credit_card": "#8b5cf6",  # purple
+    "cash":        "#22c55e",  # green
+    "metro_card":  "#14b8a6",  # teal
+    "wallet":      "#f97316",  # orange
+    "loan":        "#ef4444",  # red
+    "chitty":      "#d97706",  # amber
+    "other":       "#6b7280",  # gray
+}
+
+def _account_color(acc_type) -> str:
+    return _TYPE_COLORS.get(str(acc_type.value if hasattr(acc_type, "value") else acc_type), "#6366f1")
+
+
 class AuthFlowMixin:
     """
     Mixin for BasePlugin subclasses.
@@ -154,16 +169,15 @@ class AuthFlowMixin:
         user = auth_service.create_user(name=name, email=email, primary_bot=platform, db=db)
         auth_service.link_bot_identity(user.id, platform, chat_id, db)
         auth_service.create_session(user.id, db)
-        # Create protected Cash account
         from services import create_account
         from models import AccountType
-        create_account(db, name="Cash", type=AccountType.cash, user_id=user.id, is_protected=True)
-        # Move to account setup state
+        create_account(db, name="Cash", type=AccountType.cash, user_id=user.id,
+                       color=_account_color(AccountType.cash), is_protected=True)
         auth_service.set_bot_state(platform, chat_id, "awaiting_accounts_setup", db, user_id=user.id)
         await self.send_message(
             chat_id,
-            f"✅ Welcome, *{user.name}*! Your *Cash* account is ready.\n\n"
-            "Now tell me what other accounts you use — one at a time.\n"
+            f"✅ Welcome, *{user.name}*!\n\n"
+            "Tell me what other accounts you use — one at a time.\n"
             "Examples: *HDFC Savings bank*, *HDFC Credit Card*, *Amazon Pay wallet*\n\n"
             "Say *done* when finished.",
         )
@@ -226,7 +240,8 @@ class AuthFlowMixin:
             return None
 
         user = auth_service.get_user_by_bot(platform, chat_id, db)
-        create_account(db, name=parsed.name, type=acc_type, user_id=user.id)
+        create_account(db, name=parsed.name, type=acc_type, user_id=user.id,
+                       color=_account_color(acc_type))
         type_label = parsed.type.replace("_", " ").title()
         await self.send_message(
             chat_id,

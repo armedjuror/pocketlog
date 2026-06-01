@@ -529,6 +529,34 @@
   .acc-meta { font-size: 11.5px; color: var(--text2); margin-top: 5px; }
   .acc-actions { display: flex; gap: 7px; margin-top: 14px; }
 
+  /* Credit card utilization */
+  .cc-util-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    margin-top: 12px;
+    margin-bottom: 5px;
+    font-size: 11.5px;
+  }
+  .cc-util-label { color: var(--text2); }
+  .cc-util-value { font-weight: 600; }
+  .cc-available { color: var(--green); }
+  .cc-available.low { color: var(--yellow); }
+  .cc-available.critical { color: var(--red); }
+  .acc-tag {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    font-size: 10px;
+    font-weight: 600;
+    letter-spacing: .5px;
+    text-transform: uppercase;
+    padding: 2px 7px;
+    border-radius: 4px;
+    margin-bottom: 8px;
+  }
+  .acc-tag-addon { background: var(--blue-dim); color: var(--blue); }
+
   /* Progress bar (for account) */
   .acc-progress-bg {
     height: 4px;
@@ -1169,6 +1197,19 @@
           <input type="number" id="accDue" placeholder="e.g. 5" min="1" max="31">
         </div>
       </div>
+      <div id="ccFields" style="display:none">
+        <div class="form-row">
+          <label>Credit Limit (&#8377;)</label>
+          <input type="number" id="accCreditLimit" placeholder="e.g. 200000">
+        </div>
+        <div class="form-row">
+          <label>Shared Limit Card <span style="color:var(--muted);font-weight:400;text-transform:none;letter-spacing:0">(optional — for add-on cards)</span></label>
+          <select id="accSharedLimit">
+            <option value="">None — this card has its own limit</option>
+          </select>
+          <p style="font-size:11.5px;color:var(--muted);margin-top:5px;line-height:1.5">If this is an add-on card that shares the limit of another card, select the primary card. Leave blank if it has its own limit.</p>
+        </div>
+      </div>
       <div class="form-row">
         <label>Notes</label>
         <textarea id="accNotes" rows="2" placeholder="Any details..."></textarea>
@@ -1646,25 +1687,74 @@ async function loadAccounts() {
     el.innerHTML = `<div class="empty" style="grid-column:1/-1"><div class="empty-icon">&#x1F4B3;</div><p>No accounts yet. Add one to get started.</p></div>`;
     return;
   }
-  el.innerHTML = accounts.map(a => `
+  el.innerHTML = accounts.map(a => {
+    const isCC = a.type === 'credit_card';
+    const parentName = a.shared_limit_account_id
+      ? (accounts.find(x => x.id === a.shared_limit_account_id) || {}).name || 'Primary card'
+      : null;
+
+    // Credit utilization
+    let ccBlock = '';
+    if (isCC && a.credit_limit) {
+      const util = a.outstanding / a.credit_limit * 100;
+      const availClass = util > 85 ? 'critical' : util > 65 ? 'low' : '';
+      const barColor = util > 85 ? 'var(--red)' : util > 65 ? 'var(--yellow)' : 'var(--green)';
+      ccBlock = `
+        <div class="cc-util-row">
+          <span class="cc-util-label">Available</span>
+          <span class="cc-util-value cc-available ${availClass}">&#8377;${fmt(a.available_credit)}</span>
+        </div>
+        <div class="acc-progress-bg">
+          <div class="acc-progress-fill" style="width:${Math.min(util,100).toFixed(1)}%;background:${barColor}"></div>
+        </div>
+        <div style="display:flex;justify-content:space-between;margin-top:5px;font-size:11px;color:var(--muted)">
+          <span>&#8377;${fmt(a.outstanding)} used</span>
+          <span>&#8377;${fmt(a.credit_limit)} limit</span>
+        </div>`;
+    } else if (isCC && a.shared_limit_account_id) {
+      // Add-on card — no own limit, shows outstanding only
+      ccBlock = `<div class="acc-meta" style="margin-top:8px">Outstanding: &#8377;${fmt(a.outstanding)}</div>`;
+    }
+
+    return `
     <div class="account-card" style="--acc-color:${a.color}">
       <div class="account-card-glow"></div>
-      <div class="acc-type-badge">${a.type.replace(/_/g,' ')}</div>
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px">
+        <div class="acc-type-badge" style="margin:0">${a.type.replace(/_/g,' ')}</div>
+        ${parentName ? `<span class="acc-tag acc-tag-addon">Add-on &middot; ${parentName}</span>` : ''}
+      </div>
       <div class="acc-name">${a.name}</div>
       <div class="acc-balance ${a.balance < 0 ? 'negative' : ''}">&#8377;${fmt(a.balance)}</div>
       ${a.monthly_emi ? `<div class="acc-meta">EMI &#8377;${fmt(a.monthly_emi)}/mo &middot; Due ${a.due_date}th</div>` : ''}
-      ${a.total_amount ? `
+      ${a.total_amount && !isCC ? `
         <div style="margin-top:10px">
           <div style="font-size:11.5px;color:var(--text2);margin-bottom:5px">&#8377;${fmt(a.balance)} of &#8377;${fmt(a.total_amount)}</div>
           <div class="acc-progress-bg">
             <div class="acc-progress-fill" style="width:${Math.min(Math.abs(a.balance/a.total_amount)*100,100)}%"></div>
           </div>
         </div>` : ''}
+      ${ccBlock}
       <div class="acc-actions">
         <button class="btn btn-ghost btn-sm" onclick="editAccount(${a.id})">Edit</button>
         <button class="btn btn-danger btn-sm" onclick="deleteAccount(${a.id})">Delete</button>
       </div>
-    </div>`).join('');
+    </div>`;
+  }).join('');
+}
+
+function populateCCSharedSelect(selectedId = '') {
+  const sel = document.getElementById('accSharedLimit');
+  const editId = document.getElementById('editAccountId').value;
+  sel.innerHTML = '<option value="">None — this card has its own limit</option>';
+  accounts
+    .filter(a => a.type === 'credit_card' && String(a.id) !== editId && !a.shared_limit_account_id)
+    .forEach(a => {
+      const opt = document.createElement('option');
+      opt.value = a.id;
+      opt.textContent = a.name + (a.credit_limit ? ` (limit ₹${fmt(a.credit_limit)})` : '');
+      if (String(a.id) === String(selectedId)) opt.selected = true;
+      sel.appendChild(opt);
+    });
 }
 
 function openAddAccount() {
@@ -1678,12 +1768,16 @@ function openAddAccount() {
   document.getElementById('accEmi').value = '';
   document.getElementById('accDue').value = '';
   document.getElementById('accNotes').value = '';
+  document.getElementById('accCreditLimit').value = '';
   document.getElementById('loanFields').style.display = 'none';
+  document.getElementById('ccFields').style.display = 'none';
   openModal('accountModal');
 }
 
 document.getElementById('accType').addEventListener('change', function() {
   document.getElementById('loanFields').style.display = ['loan','chitty'].includes(this.value) ? 'block' : 'none';
+  document.getElementById('ccFields').style.display = this.value === 'credit_card' ? 'block' : 'none';
+  if (this.value === 'credit_card') populateCCSharedSelect();
 });
 
 function editAccount(id) {
@@ -1699,7 +1793,11 @@ function editAccount(id) {
   document.getElementById('accEmi').value = a.monthly_emi || '';
   document.getElementById('accDue').value = a.due_date || '';
   document.getElementById('accNotes').value = a.notes || '';
+  document.getElementById('accCreditLimit').value = a.credit_limit || '';
   document.getElementById('loanFields').style.display = ['loan','chitty'].includes(a.type) ? 'block' : 'none';
+  const isCC = a.type === 'credit_card';
+  document.getElementById('ccFields').style.display = isCC ? 'block' : 'none';
+  if (isCC) populateCCSharedSelect(a.shared_limit_account_id || '');
   openModal('accountModal');
 }
 
@@ -1707,6 +1805,7 @@ async function saveAccount() {
   const name = document.getElementById('accName').value.trim();
   const type = document.getElementById('accType').value;
   if (!name) { toast('Enter account name', 'error'); return; }
+  const sharedVal = document.getElementById('accSharedLimit').value;
   const body = {
     name, type,
     balance: parseFloat(document.getElementById('accBalance').value) || 0,
@@ -1716,6 +1815,8 @@ async function saveAccount() {
     monthly_emi: parseFloat(document.getElementById('accEmi').value) || null,
     due_date: parseInt(document.getElementById('accDue').value) || null,
     notes: document.getElementById('accNotes').value || null,
+    credit_limit: type === 'credit_card' ? (parseFloat(document.getElementById('accCreditLimit').value) || null) : null,
+    shared_limit_account_id: (type === 'credit_card' && sharedVal) ? parseInt(sharedVal) : null,
   };
   const editId = document.getElementById('editAccountId').value;
   if (editId) await api(`/api/accounts/${editId}`, 'PUT', body);
