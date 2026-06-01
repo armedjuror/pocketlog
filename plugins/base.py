@@ -121,7 +121,7 @@ class BasePlugin(ABC):
 
         # Management intent — redirect to dashboard
         if re.search(r"\b(close|delete|deactivate|remove|cancel|disable)\b", text):
-            return "Account management isn't available via bot — use the dashboard to close or deactivate accounts."
+            return "To delete your account permanently, go to the dashboard → sidebar → *Delete account*."
 
         from services import get_accounts
         accounts = get_accounts(db, user_id=msg.user_id)

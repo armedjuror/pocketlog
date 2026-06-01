@@ -181,8 +181,69 @@ def web_verify_otp(data: WebOTPVerify, response: Response, db: Session = Depends
     return {"ok": True, "name": user.name}
 
 
+@app.get("/api/me", include_in_schema=False)
+def get_me(web_user=Depends(get_web_user)):
+    if not web_user:
+        raise HTTPException(401, "Not authenticated")
+    return {"id": web_user.id, "name": web_user.name, "email": web_user.email, "primary_bot": web_user.primary_bot}
+
+
+class ProfileUpdate(BaseModel):
+    name: str
+    primary_bot: str
+
+
+@app.patch("/api/me", include_in_schema=False)
+def update_me(data: ProfileUpdate, db: Session = Depends(get_db), web_user=Depends(get_web_user)):
+    if not web_user:
+        raise HTTPException(401, "Not authenticated")
+    if len(data.name.strip()) < 2:
+        raise HTTPException(400, "Name must be at least 2 characters")
+    if data.primary_bot not in supported_plugins:
+        raise HTTPException(400, f"Unsupported bot: {data.primary_bot}")
+    web_user.name = data.name.strip()
+    web_user.primary_bot = data.primary_bot
+    db.commit()
+    return {"ok": True, "name": web_user.name, "primary_bot": web_user.primary_bot}
+
+
 @app.post("/api/auth/logout", include_in_schema=False)
 def logout(response: Response):
+    response.delete_cookie("hisaab_session", path="/")
+    return {"ok": True}
+
+
+@app.delete("/api/auth/account", include_in_schema=False)
+def delete_account_permanently(
+    response: Response,
+    db: Session = Depends(get_db),
+    web_user=Depends(get_web_user),
+):
+    """Permanently delete the authenticated user and all their data."""
+    if not web_user:
+        raise HTTPException(401, "Not authenticated")
+    uid = web_user.id
+    from models import (
+        BotConversationState, OTPSession, UserSession, BotIdentity,
+        OAuthAccessToken, OAuthClient, Transaction, Budget, Lending, Account,
+    )
+    # Delete in FK-safe order
+    db.query(BotConversationState).filter(BotConversationState.user_id == uid).delete()
+    db.query(OTPSession).filter(OTPSession.user_id == uid).delete()
+    db.query(UserSession).filter(UserSession.user_id == uid).delete()
+    db.query(BotIdentity).filter(BotIdentity.user_id == uid).delete()
+    db.query(Transaction).filter(Transaction.user_id == uid).delete()
+    db.query(Budget).filter(Budget.user_id == uid).delete()
+    db.query(Lending).filter(Lending.user_id == uid).delete()
+    # OAuth tokens before clients
+    client_ids = [c.id for c in db.query(OAuthClient).filter(OAuthClient.user_id == uid).all()]
+    if client_ids:
+        db.query(OAuthAccessToken).filter(OAuthAccessToken.client_id.in_(client_ids)).delete()
+    db.query(OAuthClient).filter(OAuthClient.user_id == uid).delete()
+    # User-owned accounts (system accounts have user_id=None)
+    db.query(Account).filter(Account.user_id == uid).delete()
+    db.query(web_user.__class__).filter(web_user.__class__.id == uid).delete()
+    db.commit()
     response.delete_cookie("hisaab_session", path="/")
     return {"ok": True}
 

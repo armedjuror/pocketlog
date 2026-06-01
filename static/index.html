@@ -223,10 +223,14 @@
 
     <div class="sidebar-spacer"></div>
 
+    <div class="nav-item" onclick="showPage('profile')">
+      <span class="nav-icon">👤</span> Profile
+    </div>
     <button class="logout-btn" onclick="logout()">
       <span class="nav-icon">↩</span> Sign out
     </button>
   </nav>
+
 
   <main class="main">
     <!-- Topbar -->
@@ -341,6 +345,36 @@
       <div id="lendingList"></div>
     </div>
 
+    <!-- PROFILE PAGE -->
+    <div class="page" id="page-profile">
+      <div class="chart-card" style="max-width:480px;margin-bottom:20px">
+        <div class="section-title" style="margin-bottom:16px">Edit Profile</div>
+        <div class="form-row">
+          <label>Name</label>
+          <input type="text" id="profileName" class="form-control" placeholder="Your name">
+        </div>
+        <div class="form-row">
+          <label>Email</label>
+          <input type="text" id="profileEmail" class="form-control" disabled style="opacity:.5;cursor:not-allowed">
+        </div>
+        <div class="form-row">
+          <label>Primary Bot</label>
+          <select id="profilePrimaryBot" class="form-control"></select>
+        </div>
+        <div style="margin-top:20px">
+          <button class="btn btn-primary" onclick="saveProfile()">Save Changes</button>
+        </div>
+      </div>
+
+      <div class="chart-card" style="max-width:480px;border:1px solid rgba(239,68,68,.3)">
+        <div class="section-title" style="color:var(--red);margin-bottom:8px">Danger Zone</div>
+        <p style="color:var(--text-muted);font-size:.9rem;line-height:1.6;margin-bottom:16px">
+          Permanently delete your account and all data — transactions, accounts, budgets, lending records, and bot connections. <strong style="color:var(--text)">This cannot be undone.</strong>
+        </p>
+        <button class="btn btn-danger" onclick="openDeleteAccount()">Delete Account Permanently</button>
+      </div>
+    </div>
+
     <!-- ANALYTICS PAGE -->
     <div class="page" id="page-analytics">
       <div class="grid2" style="margin-bottom:20px">
@@ -364,6 +398,21 @@
 
 <!-- Toast -->
 <div id="toast"></div>
+
+<!-- DELETE ACCOUNT MODAL -->
+<div class="modal-overlay" id="deleteAccountModal" style="display:none" onclick="if(event.target===this)closeDeleteAccount()">
+  <div class="modal" style="max-width:400px">
+    <button class="close-btn" onclick="closeDeleteAccount()">×</button>
+    <h2 style="color:var(--red)">Delete Account</h2>
+    <p style="color:var(--text-muted);line-height:1.6"><strong style="color:var(--text)">This cannot be undone.</strong> All your transactions, accounts, budgets, lending records, and bot connections will be permanently deleted.</p>
+    <p style="margin-top:16px;color:var(--text-muted)">Type <strong style="color:var(--text)">DELETE</strong> to confirm:</p>
+    <input id="deleteConfirmInput" type="text" class="form-control" placeholder="DELETE" style="margin-top:8px" oninput="document.getElementById('confirmDeleteBtn').disabled=this.value!=='DELETE'">
+    <div style="display:flex;gap:10px;margin-top:20px;justify-content:flex-end">
+      <button class="btn btn-ghost" onclick="closeDeleteAccount()">Cancel</button>
+      <button id="confirmDeleteBtn" class="btn btn-danger" disabled onclick="confirmDeleteAccount()">Delete Everything</button>
+    </div>
+  </div>
+</div>
 
 <!-- ADD / EDIT TRANSACTION MODAL -->
 <div class="modal-overlay" id="txnModal">
@@ -572,8 +621,9 @@ function showPage(name) {
   document.getElementById('page-' + name).classList.add('active');
   document.querySelector(`[onclick="showPage('${name}')"]`).classList.add('active');
   const titles = { dashboard: 'Dashboard', transactions: 'Transactions',
-    accounts: 'Accounts', budgets: 'Budgets', lending: 'Lending', analytics: 'Analytics' };
-  document.getElementById('pageTitle').textContent = titles[name];
+    accounts: 'Accounts', budgets: 'Budgets', lending: 'Lending', analytics: 'Analytics',
+    profile: 'Profile' };
+  document.getElementById('pageTitle').textContent = titles[name] || name;
   closeSidebar();
   if (name === 'dashboard') loadDashboard();
   else if (name === 'transactions') { txnPage = 0; loadTransactions(); }
@@ -581,6 +631,7 @@ function showPage(name) {
   else if (name === 'budgets') loadBudgets();
   else if (name === 'lending') loadLending();
   else if (name === 'analytics') loadAnalytics();
+  else if (name === 'profile') loadProfile();
 }
 
 function toggleSidebar() {
@@ -1175,12 +1226,59 @@ function exportCSV() {
   toast('Export started ✓');
 }
 
+// ── Profile ─────────────────────────────────────────────────────────────────
+async function loadProfile() {
+  const [me, cfg] = await Promise.all([api('/api/me'), api('/api/config')]);
+  document.getElementById('profileName').value = me.name;
+  document.getElementById('profileEmail').value = me.email;
+  const sel = document.getElementById('profilePrimaryBot');
+  sel.innerHTML = (cfg.supported_plugins || []).map(p =>
+    `<option value="${p}"${p === me.primary_bot ? ' selected' : ''}>${p.charAt(0).toUpperCase() + p.slice(1)}</option>`
+  ).join('');
+}
+
+async function saveProfile() {
+  const name = document.getElementById('profileName').value.trim();
+  const primary_bot = document.getElementById('profilePrimaryBot').value;
+  if (!name) { toast('Name is required', 'error'); return; }
+  try {
+    await api('/api/me', 'PATCH', { name, primary_bot });
+    toast('Profile updated ✓');
+  } catch (e) {
+    toast('Failed to save: ' + e.message, 'error');
+  }
+}
+
 // ── Logout ─────────────────────────────────────────────────────────────────
 async function logout() {
   try {
     await fetch('/api/auth/logout', { method: 'POST' });
   } catch (_) {}
   window.location.href = '/';
+}
+
+// ── Delete Account ──────────────────────────────────────────────────────────
+function openDeleteAccount() {
+  document.getElementById('deleteConfirmInput').value = '';
+  document.getElementById('confirmDeleteBtn').disabled = true;
+  document.getElementById('deleteAccountModal').style.display = 'flex';
+}
+function closeDeleteAccount() {
+  document.getElementById('deleteAccountModal').style.display = 'none';
+}
+async function confirmDeleteAccount() {
+  const btn = document.getElementById('confirmDeleteBtn');
+  btn.disabled = true;
+  btn.textContent = 'Deleting…';
+  try {
+    const r = await fetch('/api/auth/account', { method: 'DELETE' });
+    if (!r.ok) throw new Error();
+    window.location.href = '/';
+  } catch (_) {
+    toast('Something went wrong. Please try again.');
+    btn.disabled = false;
+    btn.textContent = 'Delete Everything';
+  }
 }
 
 // ── Init ───────────────────────────────────────────────────────────────────
