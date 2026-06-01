@@ -71,10 +71,35 @@ def get_accounts(db: Session, active_only: bool = True, user_id: Optional[int] =
     if active_only:
         q = q.filter(Account.is_active == True)
     if user_id is not None:
-        # Return system accounts (user_id=None) + user's own accounts
         from sqlalchemy import or_
         q = q.filter(or_(Account.user_id == None, Account.user_id == user_id))
-    return [_account_dict(a) for a in q.all()]
+    accounts = q.all()
+
+    # Compute this month's spend per CC account in one query
+    today = date.today()
+    cc_ids = [a.id for a in accounts if a.type == AccountType.credit_card]
+    month_spend_map: dict[int, float] = {}
+    if cc_ids:
+        rows = (
+            db.query(Transaction.account_id, func.sum(Transaction.amount))
+            .filter(
+                Transaction.account_id.in_(cc_ids),
+                Transaction.type == TransactionType.expense,
+                extract("year",  Transaction.date) == today.year,
+                extract("month", Transaction.date) == today.month,
+            )
+            .group_by(Transaction.account_id)
+            .all()
+        )
+        month_spend_map = {row[0]: round(row[1], 2) for row in rows}
+
+    result = []
+    for a in accounts:
+        d = _account_dict(a)
+        if a.type == AccountType.credit_card:
+            d["month_spend"] = month_spend_map.get(a.id, 0.0)
+        result.append(d)
+    return result
 
 
 def _normalize_cc_balance(kwargs: dict) -> dict:

@@ -1188,6 +1188,8 @@
           <label>Total Loan / Chitty Amount (&#8377;)</label>
           <input type="number" id="accTotal" placeholder="0.00">
         </div>
+      </div>
+      <div id="emiFields" style="display:none">
         <div class="form-row">
           <label>Monthly EMI / Installment (&#8377;)</label>
           <input type="number" id="accEmi" placeholder="0.00">
@@ -1704,9 +1706,11 @@ async function loadAccounts() {
         const allInGroup = accounts.filter(x => x.id === primaryCard.id || x.shared_limit_account_id === primaryCard.id);
         const combinedOutstanding = allInGroup.reduce((s, x) => s + (x.outstanding || 0), 0);
         const combinedAvailable = primaryCard.credit_limit - combinedOutstanding;
+        const combinedSpend = allInGroup.reduce((s, x) => s + (x.month_spend || 0), 0);
         const util = combinedOutstanding / primaryCard.credit_limit * 100;
         const availClass = util > 85 ? 'critical' : util > 65 ? 'low' : '';
         const barColor = util > 85 ? 'var(--red)' : util > 65 ? 'var(--yellow)' : 'var(--green)';
+        const hasAddons = allInGroup.length > 1;
         ccBlock = `
           <div class="cc-util-row">
             <span class="cc-util-label">Available</span>
@@ -1718,6 +1722,9 @@ async function loadAccounts() {
           <div style="display:flex;justify-content:space-between;margin-top:5px;font-size:11px;color:var(--muted)">
             <span>&#8377;${fmt(a.outstanding)} used</span>
             <span>&#8377;${fmt(primaryCard.credit_limit)} limit</span>
+          </div>
+          <div style="margin-top:6px;font-size:11px;color:var(--muted)">
+            This month: &#8377;${fmt(combinedSpend)}${hasAddons ? ' <span style="opacity:.7">(all cards)</span>' : ''}
           </div>`;
       }
     }
@@ -1776,12 +1783,14 @@ function openAddAccount() {
   document.getElementById('accNotes').value = '';
   document.getElementById('accCreditLimit').value = '';
   document.getElementById('loanFields').style.display = 'none';
+  document.getElementById('emiFields').style.display = 'none';
   document.getElementById('ccFields').style.display = 'none';
   openModal('accountModal');
 }
 
 document.getElementById('accType').addEventListener('change', function() {
   document.getElementById('loanFields').style.display = ['loan','chitty'].includes(this.value) ? 'block' : 'none';
+  document.getElementById('emiFields').style.display = ['loan','chitty','credit_card'].includes(this.value) ? 'block' : 'none';
   document.getElementById('ccFields').style.display = this.value === 'credit_card' ? 'block' : 'none';
   if (this.value === 'credit_card') populateCCSharedSelect();
 });
@@ -1801,6 +1810,7 @@ function editAccount(id) {
   document.getElementById('accNotes').value = a.notes || '';
   document.getElementById('accCreditLimit').value = a.credit_limit || '';
   document.getElementById('loanFields').style.display = ['loan','chitty'].includes(a.type) ? 'block' : 'none';
+  document.getElementById('emiFields').style.display = ['loan','chitty','credit_card'].includes(a.type) ? 'block' : 'none';
   const isCC = a.type === 'credit_card';
   document.getElementById('ccFields').style.display = isCC ? 'block' : 'none';
   if (isCC) populateCCSharedSelect(a.shared_limit_account_id || '');
