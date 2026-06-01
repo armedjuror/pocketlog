@@ -67,7 +67,7 @@ class BudgetStatus:
 # ── Account services ───────────────────────────────────────────────────────
 
 def get_accounts(db: Session, active_only: bool = True, user_id: Optional[int] = None) -> list[dict]:
-    q = db.query(Account)
+    q = db.query(Account).order_by(Account.id)
     if active_only:
         q = q.filter(Account.is_active == True)
     if user_id is not None:
