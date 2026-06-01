@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Hisaab — Personal Finance</title>
+<title>PocketLog — Personal Finance</title>
 <link rel="icon" href="/static/favicon.svg" type="image/svg+xml">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
 <script src="https://unpkg.com/lucide@latest/dist/umd/lucide.min.js"></script>
@@ -792,6 +792,81 @@
   /* ── Profile page ── */
   .profile-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; max-width: 900px; }
 
+  /* ── Groups page ── */
+  .groups-layout { display: flex; gap: 16px; align-items: flex-start; height: calc(100vh - 120px); min-height: 0; }
+  .groups-sidebar { width: 240px; flex-shrink: 0; overflow-y: auto; max-height: 100%; }
+  .groups-detail { flex: 1; overflow-y: auto; max-height: 100%; }
+  .groups-placeholder { flex: 1; display: flex; align-items: center; justify-content: center; }
+  .group-list { padding: 6px 0; }
+  .group-item {
+    padding: 10px 16px;
+    cursor: pointer;
+    border-radius: var(--radius-sm);
+    font-size: 14px;
+    font-weight: 500;
+    transition: background var(--transition);
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    color: var(--text2);
+  }
+  .group-item:hover { background: var(--surface2); color: var(--text); }
+  .group-item.active { background: var(--accent-dim); color: var(--accent2); }
+  .group-members-strip {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+  .member-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    background: var(--surface2);
+    border: 1px solid var(--border2);
+    border-radius: 20px;
+    padding: 4px 10px;
+    font-size: 12.5px;
+    font-weight: 500;
+    color: var(--text2);
+  }
+  .member-chip.guest { border-color: var(--yellow); color: var(--yellow); }
+  .member-avatar {
+    width: 22px; height: 22px;
+    border-radius: 50%;
+    background: var(--surface3);
+    display: flex; align-items: center; justify-content: center;
+    font-size: 11px; font-weight: 700; color: var(--accent2);
+    flex-shrink: 0;
+  }
+  .balance-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 10px 0;
+    border-bottom: 1px solid var(--border);
+  }
+  .balance-row:last-child { border-bottom: none; }
+  .balance-row-info { font-size: 13.5px; }
+  .balance-row-amount { font-family: var(--font-head); font-size: 16px; color: var(--red); font-weight: 700; }
+  .balance-row-amount.you-owe { color: var(--red); }
+  .balance-row-amount.owed-to-you { color: var(--green); }
+  .settle-btn {
+    background: var(--surface2); border: 1px solid var(--border2);
+    border-radius: var(--radius-sm); padding: 4px 10px;
+    font-size: 12px; color: var(--text2); cursor: pointer;
+    transition: all var(--transition);
+  }
+  .settle-btn:hover { border-color: var(--accent); color: var(--accent2); }
+  .share-pill {
+    display: inline-block;
+    font-size: 11.5px;
+    padding: 2px 7px;
+    border-radius: 10px;
+    margin-right: 3px;
+  }
+  .share-pill.settled { background: var(--green-dim); color: var(--green); }
+  .share-pill.unsettled { background: var(--red-dim); color: var(--red); }
+
   /* ── Responsive ── */
   @media (max-width: 1100px) {
     .summary-grid { grid-template-columns: repeat(2, 1fr); }
@@ -799,6 +874,8 @@
   @media (max-width: 900px) {
     .grid2, .grid3 { grid-template-columns: 1fr; }
     .profile-grid { grid-template-columns: 1fr; max-width: 480px; }
+    .groups-layout { flex-direction: column; height: auto; }
+    .groups-sidebar { width: 100%; }
   }
   @media (max-width: 700px) {
     :root { --sidebar-w: 0px; }
@@ -824,7 +901,7 @@
 
   <nav class="sidebar" id="sidebar">
     <div class="sidebar-head">
-      <span class="brand">Hisaab<span class="brand-dot">.</span></span>
+      <span class="brand">Pocket<span class="brand-dot">Log</span></span>
     </div>
 
     <div class="sidebar-section">
@@ -848,6 +925,10 @@
       <div class="nav-item" onclick="showPage('lending')">
         <span class="nav-icon"><i data-lucide="handshake"></i></span>
         Lending
+      </div>
+      <div class="nav-item" onclick="showPage('groups')">
+        <span class="nav-icon"><i data-lucide="users"></i></span>
+        Groups
       </div>
       <div class="nav-item" onclick="showPage('analytics')">
         <span class="nav-icon"><i data-lucide="bar-chart-2"></i></span>
@@ -1011,6 +1092,77 @@
           <div class="tab" onclick="switchLendingTab('settled', this)">Settled</div>
         </div>
         <div class="panel" id="lendingList"></div>
+      </div>
+
+      <!-- GROUPS -->
+      <div class="page" id="page-groups">
+        <div class="groups-layout">
+          <!-- Left: group list -->
+          <div class="groups-sidebar panel" id="groupListPanel">
+            <div class="panel-head"><span class="panel-title">My Groups</span></div>
+            <div id="groupList" class="group-list">
+              <div class="empty" id="groupListEmpty" style="display:none">
+                <div class="empty-icon">👥</div>
+                <p>No groups yet.<br>Add the bot to a Telegram group to get started.</p>
+              </div>
+            </div>
+          </div>
+          <!-- Right: selected group detail -->
+          <div class="groups-detail" id="groupDetail" style="display:none">
+            <div class="panel" style="margin-bottom:16px">
+              <div class="panel-head">
+                <span class="panel-title" id="groupDetailName">—</span>
+              </div>
+              <!-- Members strip -->
+              <div class="panel-body">
+                <div class="group-members-strip" id="groupMembersStrip"></div>
+              </div>
+            </div>
+            <!-- Balances -->
+            <div class="panel" style="margin-bottom:16px">
+              <div class="panel-head">
+                <span class="panel-title">Balances</span>
+                <div style="display:flex;align-items:center;gap:10px">
+                  <label style="display:flex;align-items:center;gap:6px;font-size:12.5px;color:var(--text2);cursor:pointer">
+                    <input type="checkbox" id="simplifyToggle" onchange="reloadBalances()" style="accent-color:var(--accent)">
+                    Simplify debts
+                  </label>
+                  <button class="btn btn-ghost btn-sm" onclick="openCloseGroupDialog()" id="closeGroupBtn" style="border-color:var(--red);color:var(--red);font-size:12px;padding:4px 10px">
+                    Close group
+                  </button>
+                </div>
+              </div>
+              <div class="panel-body" id="groupBalances"></div>
+            </div>
+            <!-- Expenses table -->
+            <div class="panel">
+              <div class="panel-head"><span class="panel-title">Expenses</span></div>
+              <div class="table-wrap">
+                <table>
+                  <thead><tr>
+                    <th>Date</th>
+                    <th>Description</th>
+                    <th>Paid by</th>
+                    <th>Total</th>
+                    <th>Your share</th>
+                    <th>Status</th>
+                  </tr></thead>
+                  <tbody id="groupExpensesBody"></tbody>
+                </table>
+                <div id="groupExpensesEmpty" class="empty" style="display:none">
+                  <div class="empty-icon">🧾</div>
+                  <p>No expenses yet — use the bot to split in your group</p>
+                </div>
+              </div>
+            </div>
+          </div>
+          <div class="groups-placeholder" id="groupsPlaceholder">
+            <div class="empty">
+              <div class="empty-icon">👥</div>
+              <p>Select a group to view details</p>
+            </div>
+          </div>
+        </div>
       </div>
 
       <!-- PROFILE -->
@@ -1314,6 +1466,43 @@
   </div>
 </div>
 
+<div class="modal-overlay" id="closeGroupModal">
+  <div class="modal">
+    <div class="modal-head">
+      <h2>Close Group</h2>
+      <button class="close-btn" onclick="closeModal('closeGroupModal')">&#x2715;</button>
+    </div>
+    <div class="modal-body">
+      <p style="color:var(--text2);font-size:13.5px;line-height:1.65;margin-bottom:16px">
+        Closing the group will convert all unsettled balances into <strong>Lending entries</strong> in each member's account, then mark the group as closed.
+      </p>
+      <div class="form-row">
+        <label>Balance mode</label>
+        <div style="display:flex;flex-direction:column;gap:8px;margin-top:4px">
+          <label style="display:flex;align-items:flex-start;gap:8px;cursor:pointer;font-size:13.5px">
+            <input type="radio" name="closeMode" value="simplified" checked style="margin-top:2px;accent-color:var(--accent)">
+            <span>
+              <strong>Simplified</strong> — minimise the number of transactions.<br>
+              <span style="color:var(--text2);font-size:12px">e.g. A→B→C becomes A→C directly</span>
+            </span>
+          </label>
+          <label style="display:flex;align-items:flex-start;gap:8px;cursor:pointer;font-size:13.5px">
+            <input type="radio" name="closeMode" value="actual" style="margin-top:2px;accent-color:var(--accent)">
+            <span>
+              <strong>Actual</strong> — one lending entry per balance pair as-is.<br>
+              <span style="color:var(--text2);font-size:12px">Preserves who-paid-whom relationships</span>
+            </span>
+          </label>
+        </div>
+      </div>
+      <div class="form-actions">
+        <button class="btn btn-ghost" onclick="closeModal('closeGroupModal')">Cancel</button>
+        <button class="btn btn-danger" onclick="doCloseGroup()">Close Group</button>
+      </div>
+    </div>
+  </div>
+</div>
+
 <script>
 // ── State ──────────────────────────────────────────────────────────────────
 const MONTHS = ['January','February','March','April','May','June',
@@ -1343,7 +1532,7 @@ function showPage(name, pushState = true) {
   if (navEl) navEl.classList.add('active');
   const titles = { dashboard: 'Dashboard', transactions: 'Transactions',
     accounts: 'Accounts', budgets: 'Budgets', lending: 'Lending',
-    analytics: 'Analytics', profile: 'Profile' };
+    groups: 'Groups', analytics: 'Analytics', profile: 'Profile' };
   document.getElementById('pageTitle').textContent = titles[name] || name;
   document.getElementById('txnFilters').style.display = name === 'transactions' ? 'flex' : 'none';
   if (pushState) location.hash = name === 'dashboard' ? '' : name;
@@ -1353,13 +1542,14 @@ function showPage(name, pushState = true) {
   else if (name === 'accounts') loadAccounts();
   else if (name === 'budgets') loadBudgets();
   else if (name === 'lending') loadLending();
+  else if (name === 'groups') loadGroups();
   else if (name === 'analytics') loadAnalytics();
   else if (name === 'profile') loadProfile();
 }
 
 window.addEventListener('hashchange', () => {
   const page = location.hash.replace('#', '') || 'dashboard';
-  const valid = ['dashboard','transactions','accounts','budgets','lending','analytics','profile'];
+  const valid = ['dashboard','transactions','accounts','budgets','lending','groups','analytics','profile'];
   if (valid.includes(page)) showPage(page, false);
 });
 
@@ -2158,7 +2348,7 @@ document.querySelectorAll('.modal-overlay').forEach(overlay => {
 function exportCSV() {
   const a = document.createElement('a');
   a.href = '/api/export/csv';
-  a.download = `hisaab_export_${new Date().toISOString().slice(0,10)}.csv`;
+  a.download = `pocketlog_export_${new Date().toISOString().slice(0,10)}.csv`;
   document.body.appendChild(a);
   a.click();
   document.body.removeChild(a);
@@ -2216,11 +2406,240 @@ async function confirmDeleteAccount() {
   }
 }
 
+// ── Groups / Splitwise ─────────────────────────────────────────────────────
+
+let groupsData = [];
+let selectedGroupId = null;
+let groupMembersData = [];
+let currentUserId = null;
+
+async function loadGroups() {
+  try {
+    if (!currentUserId) {
+      const me = await api('/api/me');
+      currentUserId = me.id;
+    }
+    groupsData = await api('/api/groups');
+    renderGroupList();
+    if (selectedGroupId) {
+      // Re-select if group still present
+      const still = groupsData.find(g => g.id === selectedGroupId);
+      if (still) selectGroup(selectedGroupId);
+    }
+  } catch (e) {
+    toast('Could not load groups: ' + e.message, 'error');
+  }
+}
+
+function renderGroupList() {
+  const list = document.getElementById('groupList');
+  const empty = document.getElementById('groupListEmpty');
+  list.querySelectorAll('.group-item').forEach(el => el.remove());
+
+  if (!groupsData.length) {
+    empty.style.display = '';
+    document.getElementById('groupDetail').style.display = 'none';
+    document.getElementById('groupsPlaceholder').style.display = '';
+    return;
+  }
+  empty.style.display = 'none';
+  document.getElementById('groupsPlaceholder').style.display = 'none';
+
+  groupsData.forEach(g => {
+    const el = document.createElement('div');
+    el.className = 'group-item' + (g.id === selectedGroupId ? ' active' : '');
+    el.innerHTML = `<i data-lucide="${g.is_closed ? 'archive' : 'users'}" style="width:15px;height:15px"></i> ${gEsc(g.name)}${g.is_closed ? ' <span style="font-size:10px;opacity:.5">(closed)</span>' : ''}`;
+    el.onclick = () => selectGroup(g.id);
+    list.appendChild(el);
+  });
+  lucide.createIcons();
+}
+
+async function selectGroup(gid) {
+  selectedGroupId = gid;
+  renderGroupList();
+
+  const group = groupsData.find(g => g.id === gid);
+  document.getElementById('groupDetail').style.display = '';
+  document.getElementById('groupsPlaceholder').style.display = 'none';
+
+  const closedBadge = group && group.is_closed
+    ? ' <span style="font-size:11px;padding:2px 8px;border-radius:10px;background:var(--surface3);color:var(--muted)">Closed</span>'
+    : '';
+  document.getElementById('groupDetailName').innerHTML = gEsc(group ? group.name : 'Group') + closedBadge;
+
+  // Show/hide close button based on closed state
+  const closeBtn = document.getElementById('closeGroupBtn');
+  if (closeBtn) closeBtn.style.display = (group && group.is_closed) ? 'none' : '';
+
+  try {
+    const simplified = document.getElementById('simplifyToggle').checked;
+    const [members, expenses, balances] = await Promise.all([
+      api(`/api/groups/${gid}/members`),
+      api(`/api/groups/${gid}/expenses`),
+      api(`/api/groups/${gid}/balances?simplified=${simplified}`),
+    ]);
+    groupMembersData = members;
+    renderGroupMembers(members);
+    renderGroupBalances(balances, members, gid);
+    renderGroupExpenses(expenses, members);
+  } catch (e) {
+    toast('Failed to load group data: ' + e.message, 'error');
+  }
+}
+
+async function reloadBalances() {
+  if (!selectedGroupId) return;
+  try {
+    const simplified = document.getElementById('simplifyToggle').checked;
+    const balances = await api(`/api/groups/${selectedGroupId}/balances?simplified=${simplified}`);
+    renderGroupBalances(balances, groupMembersData, selectedGroupId);
+  } catch (e) {
+    toast('Failed to reload balances: ' + e.message, 'error');
+  }
+}
+
+function openCloseGroupDialog() {
+  openModal('closeGroupModal');
+}
+
+async function doCloseGroup() {
+  if (!selectedGroupId) return;
+  const mode = document.querySelector('input[name="closeMode"]:checked').value;
+  const use_simplified = mode === 'simplified';
+  try {
+    const result = await api(`/api/groups/${selectedGroupId}/close`, 'POST', { use_simplified });
+    closeModal('closeGroupModal');
+    toast(`Group closed. ${result.created} lending entries created.`);
+    await loadGroups();
+    if (groupsData.find(g => g.id === selectedGroupId)) {
+      await selectGroup(selectedGroupId);
+    }
+  } catch (e) {
+    toast('Failed to close group: ' + e.message, 'error');
+  }
+}
+
+function renderGroupMembers(members) {
+  const strip = document.getElementById('groupMembersStrip');
+  strip.innerHTML = '';
+  members.forEach(m => {
+    const initials = m.display_name.split(' ').map(w => w[0]).join('').toUpperCase().slice(0, 2);
+    const isGuest = m.is_guest;
+    const chip = document.createElement('div');
+    chip.className = 'member-chip' + (isGuest ? ' guest' : '');
+    chip.innerHTML = `<div class="member-avatar">${gEsc(initials)}</div>
+      ${gEsc(m.display_name)}${isGuest ? ' <span style="font-size:10px;opacity:.7">(guest)</span>' : ''}`;
+    strip.appendChild(chip);
+  });
+}
+
+function renderGroupBalances(balances, members, gid) {
+  const container = document.getElementById('groupBalances');
+  if (!balances.length) {
+    container.innerHTML = '<p style="color:var(--green);font-size:14px;padding:8px 0">All settled up! 🎉</p>';
+    return;
+  }
+  const myMember = members.find(m => m.user_id === currentUserId);
+  const myMemberId = myMember ? myMember.id : null;
+  container.innerHTML = balances.map(b => {
+    const iOwe = b.from_member_id === myMemberId;
+    const owedToMe = b.to_member_id === myMemberId;
+    const amtCls = iOwe ? 'you-owe' : (owedToMe ? 'owed-to-you' : '');
+    const label = iOwe
+      ? `You owe <strong>${gEsc(b.to_name)}</strong>`
+      : owedToMe
+        ? `<strong>${gEsc(b.from_name)}</strong> owes you`
+        : `<strong>${gEsc(b.from_name)}</strong> owes <strong>${gEsc(b.to_name)}</strong>`;
+    const settleBtn = (iOwe || owedToMe)
+      ? `<button class="settle-btn" onclick="openSettleDialog(${gid},${b.from_member_id},${b.to_member_id},${b.amount},'${gEsc(b.from_name)}','${gEsc(b.to_name)}')">Settle</button>`
+      : '';
+    return `<div class="balance-row">
+      <div class="balance-row-info">${label}</div>
+      <div style="display:flex;align-items:center;gap:10px">
+        <span class="balance-row-amount ${amtCls}">${gFmt(b.amount)}</span>
+        ${settleBtn}
+      </div>
+    </div>`;
+  }).join('');
+}
+
+function renderGroupExpenses(expenses, members) {
+  const tbody = document.getElementById('groupExpensesBody');
+  const empty = document.getElementById('groupExpensesEmpty');
+  tbody.innerHTML = '';
+
+  if (!expenses.length) {
+    empty.style.display = '';
+    return;
+  }
+  empty.style.display = 'none';
+
+  const myMember = members.find(m => m.user_id === currentUserId);
+  const myMemberId = myMember ? myMember.id : null;
+
+  expenses.forEach(exp => {
+    const myShare = exp.shares.find(s => s.member_id === myMemberId);
+    const myShareAmt = myShare ? myShare.share_amount : null;
+    const mySettled = myShare ? myShare.is_settled : null;
+
+    const sharesHtml = exp.shares.map(s =>
+      `<span class="share-pill ${s.is_settled ? 'settled' : 'unsettled'}" title="${gEsc(s.display_name)}: ${gFmt(s.share_amount)}">${gEsc(s.display_name)}</span>`
+    ).join('');
+
+    const statusHtml = myShare
+      ? `<span style="font-size:12px;padding:2px 8px;border-radius:10px;background:${myShare.is_settled ? 'var(--green-dim)' : 'var(--red-dim)'};color:${myShare.is_settled ? 'var(--green)' : 'var(--red)'}">${myShare.is_settled ? 'Settled' : 'Unsettled'}</span>`
+      : '—';
+
+    const tr = document.createElement('tr');
+    tr.innerHTML = `
+      <td>${gEsc(exp.date)}</td>
+      <td>${gEsc(exp.description)}</td>
+      <td>${gEsc(exp.paid_by_name || '—')}</td>
+      <td>${gFmt(exp.amount)}</td>
+      <td>${myShareAmt !== null ? gFmt(myShareAmt) : '—'}</td>
+      <td>${statusHtml}</td>
+    `;
+    tbody.appendChild(tr);
+  });
+}
+
+function openSettleDialog(gid, fromMemberId, toMemberId, amount, fromName, toName) {
+  const confirmed = confirm(
+    `Settle: ${fromName} pays ${toName} — ${gFmt(amount)}?\n\nThis will mark the balance as settled.`
+  );
+  if (!confirmed) return;
+  settleGroup(gid, fromMemberId, toMemberId, amount);
+}
+
+async function settleGroup(gid, fromMemberId, toMemberId, amount) {
+  try {
+    await api(`/api/groups/${gid}/settle`, 'POST', {
+      from_member_id: fromMemberId,
+      to_member_id: toMemberId,
+      amount,
+    });
+    toast('Settled successfully');
+    await selectGroup(gid);
+  } catch (e) {
+    toast('Settle failed: ' + e.message, 'error');
+  }
+}
+
+function gEsc(s) {
+  if (!s) return '';
+  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+function gFmt(n) {
+  return '₹' + Number(n).toLocaleString('en-IN', { minimumFractionDigits: 0, maximumFractionDigits: 2 });
+}
+
 // ── Init ───────────────────────────────────────────────────────────────────
 (async () => {
   await loadBase();
   const initPage = location.hash.replace('#', '') || 'dashboard';
-  const valid = ['dashboard','transactions','accounts','budgets','lending','analytics','profile'];
+  const valid = ['dashboard','transactions','accounts','budgets','lending','groups','analytics','profile'];
   showPage(valid.includes(initPage) ? initPage : 'dashboard', false);
   // Re-run lucide after dynamic content loads
   lucide.createIcons();

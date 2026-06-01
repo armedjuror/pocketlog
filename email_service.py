@@ -7,7 +7,7 @@ import logging
 
 log = logging.getLogger(__name__)
 
-_FROM = os.getenv("FROM_EMAIL", "Hisaab <noreply@hisaab.app>")
+_FROM = os.getenv("FROM_EMAIL", "PocketLog <noreply@pocketlog.app>")
 
 
 def send_email_otp(to_email: str, name: str, otp: str) -> bool:
@@ -26,7 +26,7 @@ def send_email_otp(to_email: str, name: str, otp: str) -> bool:
     html = f"""
     <div style="font-family:sans-serif;max-width:480px;margin:0 auto;padding:32px">
       <h2 style="margin-bottom:8px">Verify your email</h2>
-      <p style="color:#555">Hi {name}, use the code below to verify your email for Hisaab:</p>
+      <p style="color:#555">Hi {name}, use the code below to verify your email for PocketLog:</p>
       <div style="font-size:36px;font-weight:bold;letter-spacing:8px;
                   background:#f4f4f5;border-radius:8px;padding:20px 32px;
                   text-align:center;margin:24px 0">{otp}</div>
@@ -38,7 +38,7 @@ def send_email_otp(to_email: str, name: str, otp: str) -> bool:
         resend.Emails.send({
             "from": _FROM,
             "to": [to_email],
-            "subject": f"{otp} is your Hisaab verification code",
+            "subject": f"{otp} is your PocketLog verification code",
             "html": html,
         })
         return True

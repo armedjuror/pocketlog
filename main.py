@@ -30,7 +30,7 @@ init_db()
 SessionLocal = sessionmaker(bind=engine)
 
 app = FastAPI(
-    title="Hisaab API",
+    title="PocketLog API",
     description=(
         "Personal finance API — track expenses, budgets, lending and more.\n\n"
         "## Authentication\n\n"
@@ -60,7 +60,7 @@ def api_docs():
     html = """<!DOCTYPE html>
 <html>
 <head>
-<title>Hisaab API</title>
+<title>PocketLog API</title>
 <meta charset="utf-8"/>
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <style>body{margin:0;padding:0}</style>
@@ -91,7 +91,7 @@ def get_db():
 
 def get_web_user(request: Request, db: Session = Depends(get_db)):
     """Resolve the session cookie to a User, or return None."""
-    token = request.cookies.get("hisaab_session")
+    token = request.cookies.get("pocketlog_session")
     if not token:
         return None
     return oauth_service.get_user_from_token(token, db)
@@ -107,7 +107,7 @@ def root():
 @app.get("/login", include_in_schema=False)
 def login_page(request: Request, db: Session = Depends(get_db)):
     # Already logged in → skip to dashboard
-    token = request.cookies.get("hisaab_session")
+    token = request.cookies.get("pocketlog_session")
     if token and oauth_service.get_user_from_token(token, db):
         return RedirectResponse("/app", status_code=302)
     return FileResponse("static/login.html")
@@ -171,7 +171,7 @@ async def web_request_otp(data: WebOTPRequest, db: Session = Depends(get_db)):
             try:
                 await plugin.send_message(
                     target.chat_id,
-                    f"Your Hisaab web login code:\n\n*{otp}*\n\nExpires in 10 minutes.",
+                    f"Your PocketLog web login code:\n\n*{otp}*\n\nExpires in 10 minutes.",
                 )
             except Exception as exc:
                 import logging as _log
@@ -198,7 +198,7 @@ def web_verify_otp(data: WebOTPVerify, response: Response, db: Session = Depends
         raise HTTPException(401, "Invalid or expired code")
 
     response.set_cookie(
-        key      = "hisaab_session",
+        key      = "pocketlog_session",
         value    = session.token,
         max_age  = 30 * 24 * 3600,
         httponly = True,
@@ -236,7 +236,7 @@ def update_me(data: ProfileUpdate, db: Session = Depends(get_db), web_user=Depen
 
 @app.post("/api/auth/logout", include_in_schema=False)
 def logout(response: Response):
-    response.delete_cookie("hisaab_session", path="/")
+    response.delete_cookie("pocketlog_session", path="/")
     return {"ok": True}
 
 
@@ -281,7 +281,7 @@ def delete_account_permanently(
     db.query(Account).filter(Account.user_id == uid).delete()
     db.query(web_user.__class__).filter(web_user.__class__.id == uid).delete()
     db.commit()
-    response.delete_cookie("hisaab_session", path="/")
+    response.delete_cookie("pocketlog_session", path="/")
     return {"ok": True}
 
 
@@ -486,6 +486,82 @@ def delete_lending(lid: int, db: Session = Depends(get_db)):
     except ValueError as e:
         raise HTTPException(404, str(e))
     return {"ok": True}
+
+
+# ── Groups / Splitwise ─────────────────────────────────────────────────────
+
+class GroupSettleIn(BaseModel):
+    from_member_id: int
+    to_member_id:   int
+    amount:         float
+
+class GroupCloseIn(BaseModel):
+    use_simplified: bool = True
+
+
+@app.get("/api/groups", include_in_schema=False)
+def list_groups(db: Session = Depends(get_db), web_user=Depends(get_web_user)):
+    if not web_user:
+        raise HTTPException(401, "Not authenticated")
+    return services.get_user_groups(web_user.id, db)
+
+
+@app.get("/api/groups/{gid}/members", include_in_schema=False)
+def group_members(gid: int, db: Session = Depends(get_db), web_user=Depends(get_web_user)):
+    if not web_user:
+        raise HTTPException(401, "Not authenticated")
+    # Verify user is a member of this group
+    members = services.get_group_members(gid, db)
+    if not any(m["user_id"] == web_user.id for m in members):
+        raise HTTPException(403, "Not a member of this group")
+    return members
+
+
+@app.get("/api/groups/{gid}/expenses", include_in_schema=False)
+def group_expenses(gid: int, db: Session = Depends(get_db), web_user=Depends(get_web_user)):
+    if not web_user:
+        raise HTTPException(401, "Not authenticated")
+    members = services.get_group_members(gid, db)
+    if not any(m["user_id"] == web_user.id for m in members):
+        raise HTTPException(403, "Not a member of this group")
+    return services.list_group_expenses(gid, db)
+
+
+@app.get("/api/groups/{gid}/balances", include_in_schema=False)
+def group_balances(
+    gid: int,
+    simplified: bool = False,
+    db: Session = Depends(get_db),
+    web_user=Depends(get_web_user),
+):
+    if not web_user:
+        raise HTTPException(401, "Not authenticated")
+    members = services.get_group_members(gid, db)
+    if not any(m["user_id"] == web_user.id for m in members):
+        raise HTTPException(403, "Not a member of this group")
+    if simplified:
+        return services.get_simplified_balances(gid, db)
+    return services.get_group_balances(gid, db)
+
+
+@app.post("/api/groups/{gid}/close", include_in_schema=False)
+def close_group(gid: int, data: GroupCloseIn, db: Session = Depends(get_db), web_user=Depends(get_web_user)):
+    if not web_user:
+        raise HTTPException(401, "Not authenticated")
+    members = services.get_group_members(gid, db)
+    if not any(m["user_id"] == web_user.id for m in members):
+        raise HTTPException(403, "Not a member of this group")
+    return services.close_group(gid, data.use_simplified, db)
+
+
+@app.post("/api/groups/{gid}/settle", include_in_schema=False)
+def settle_group(gid: int, data: GroupSettleIn, db: Session = Depends(get_db), web_user=Depends(get_web_user)):
+    if not web_user:
+        raise HTTPException(401, "Not authenticated")
+    members = services.get_group_members(gid, db)
+    if not any(m["user_id"] == web_user.id for m in members):
+        raise HTTPException(403, "Not a member of this group")
+    return services.settle_group(gid, data.from_member_id, data.to_member_id, data.amount, db)
 
 
 # ── Analytics ──────────────────────────────────────────────────────────────

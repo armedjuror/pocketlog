@@ -381,7 +381,7 @@ def export_csv(
     as a multi-section CSV file.
     """
     content  = services.export_csv(db, user_id=user.id)
-    filename = f"hisaab_export_{date.today().isoformat()}.csv"
+    filename = f"pocketlog_export_{date.today().isoformat()}.csv"
     return StreamingResponse(
         iter([content]),
         media_type="text/csv",

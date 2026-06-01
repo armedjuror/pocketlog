@@ -19,7 +19,8 @@ class User(Base):
 
     id          = Column(Integer, primary_key=True, index=True)
     name        = Column(String(100), nullable=False)
-    email       = Column(String(255), unique=True, nullable=False, index=True)
+    email       = Column(String(255), unique=True, nullable=True, index=True)  # nullable for guests
+    is_guest    = Column(Boolean, default=False, nullable=False)
     primary_bot = Column(String(50), default="telegram", nullable=False)
     currency    = Column(String(10), default="INR", nullable=False)
     created_at  = Column(DateTime, server_default=func.now())
@@ -244,6 +245,70 @@ class Lending(Base):
     created_at      = Column(DateTime, server_default=func.now())
 
 
+# ── Group / Splitwise models ───────────────────────────────────────────────
+
+class GroupChat(Base):
+    __tablename__ = "group_chats"
+    __table_args__ = (UniqueConstraint("platform", "chat_id", name="uq_group_chat"),)
+
+    id         = Column(Integer, primary_key=True, index=True)
+    platform   = Column(String(50),  nullable=False)   # "telegram"
+    chat_id    = Column(String(200), nullable=False)   # negative int for Telegram groups
+    name       = Column(String(200), nullable=True)    # group title
+    is_closed  = Column(Boolean, default=False, nullable=False)
+    created_at = Column(DateTime,    server_default=func.now())
+
+    members  = relationship("GroupMember",  back_populates="group")
+    expenses = relationship("GroupExpense", back_populates="group")
+
+
+class GroupMember(Base):
+    __tablename__ = "group_members"
+    __table_args__ = (UniqueConstraint("group_chat_id", "platform_user_id", name="uq_group_member"),)
+
+    id               = Column(Integer, primary_key=True, index=True)
+    group_chat_id    = Column(Integer, ForeignKey("group_chats.id"), nullable=False, index=True)
+    user_id          = Column(Integer, ForeignKey("users.id"), nullable=True)   # None = unlinked guest
+    platform_user_id = Column(String(200), nullable=False)   # Telegram from.id
+    display_name     = Column(String(200), nullable=False)
+    username         = Column(String(200), nullable=True)    # Telegram @username (without @)
+    joined_at        = Column(DateTime,    server_default=func.now())
+
+    group = relationship("GroupChat", back_populates="members")
+    user  = relationship("User")
+
+
+class GroupExpense(Base):
+    __tablename__ = "group_expenses"
+
+    id                = Column(Integer, primary_key=True, index=True)
+    group_chat_id     = Column(Integer, ForeignKey("group_chats.id"), nullable=False, index=True)
+    paid_by_member_id = Column(Integer, ForeignKey("group_members.id"), nullable=False)
+    amount            = Column(Float,  nullable=False)
+    description       = Column(String(255), nullable=False)
+    date              = Column(Date,   nullable=False)
+    created_at        = Column(DateTime, server_default=func.now())
+
+    group      = relationship("GroupChat",  back_populates="expenses")
+    paid_by    = relationship("GroupMember", foreign_keys=[paid_by_member_id])
+    shares     = relationship("GroupExpenseShare", back_populates="expense", cascade="all, delete-orphan")
+
+
+class GroupExpenseShare(Base):
+    __tablename__ = "group_expense_shares"
+
+    id             = Column(Integer, primary_key=True, index=True)
+    expense_id     = Column(Integer, ForeignKey("group_expenses.id"), nullable=False, index=True)
+    member_id      = Column(Integer, ForeignKey("group_members.id"), nullable=False)
+    share_ratio    = Column(Float,   nullable=False, default=1.0)
+    share_amount   = Column(Float,   nullable=False)
+    is_settled     = Column(Boolean, default=False, nullable=False)
+    transaction_id = Column(Integer, ForeignKey("transactions.id"), nullable=True)
+
+    expense = relationship("GroupExpense", back_populates="shares")
+    member  = relationship("GroupMember")
+
+
 # ── Engine & init ──────────────────────────────────────────────────────────
 
 def _make_engine():
@@ -264,11 +329,6 @@ SessionLocal = sessionmaker(bind=engine)
 
 
 def init_db():
-    # Ensure all model classes are registered before create_all
-    _ = (User, BotIdentity, OTPSession, UserSession, BotConversationState,
-         OAuthClient, OAuthAccessToken,
-         Account, Category, Transaction, Budget, Lending)
-    Base.metadata.create_all(bind=engine)
     _seed(engine)
 
 

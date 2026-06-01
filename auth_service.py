@@ -46,6 +46,40 @@ def create_user(name: str, email: str, primary_bot: str, db: Session, currency: 
     return user
 
 
+def get_or_create_guest_user(
+    platform: str, platform_user_id: str, display_name: str, db: Session
+) -> User:
+    """
+    Find or create a guest User for a group member who hasn't registered.
+    Uses BotIdentity to link platform_user_id → User.
+    When a guest later completes signup with an email, call merge_guest_user().
+    """
+    identity = db.query(BotIdentity).filter_by(platform=platform, chat_id=platform_user_id).first()
+    if identity:
+        return identity.user
+
+    guest = User(name=display_name, email=None, is_guest=True, primary_bot=platform)
+    db.add(guest)
+    db.commit()
+    db.refresh(guest)
+    link_bot_identity(guest.id, platform, platform_user_id, db)
+    return guest
+
+
+def merge_guest_user(user: User, name: str, email: str, currency: str, db: Session) -> User:
+    """
+    Upgrade a guest User to a full account after they complete signup with an email.
+    All existing GroupExpenseShare and Transaction rows linked to guest.id are preserved.
+    """
+    user.name = name
+    user.email = email.lower().strip()
+    user.currency = currency
+    user.is_guest = False
+    db.commit()
+    db.refresh(user)
+    return user
+
+
 def link_bot_identity(user_id: int, platform: str, chat_id: str, db: Session) -> BotIdentity:
     identity = BotIdentity(user_id=user_id, platform=platform, chat_id=chat_id)
     db.add(identity)

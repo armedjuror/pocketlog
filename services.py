@@ -19,6 +19,7 @@ from sqlalchemy.orm import Session
 from models import (
     Account, Category, Transaction, Budget, Lending,
     AccountType, TransactionType, LendingType, User,
+    GroupChat, GroupMember, GroupExpense, GroupExpenseShare,
 )
 
 
@@ -794,7 +795,7 @@ def parse_message_with_ai(
     accounts_str   = ", ".join(f"{a['id']}:{a['name']}({a['type']})" for a in accounts)
     categories_str = ", ".join(f"{c['id']}:{c['name']}" for c in categories)
 
-    prompt = f"""You are Hisaab, a friendly personal finance assistant bot. Your primary job is logging expenses and income, but you also chat naturally.
+    prompt = f"""You are PocketLog, a friendly personal finance assistant bot. Your primary job is logging expenses and income, but you also chat naturally.
 Today: {today_str}
 Accounts  (id:name:type): {accounts_str}
 Categories (id:name):     {categories_str}
@@ -1087,3 +1088,557 @@ def generate_report(
     year  = period.year  or today.year
     summary = monthly_summary(db, month, year, user_id=user_id)
     return format_monthly_report(summary, month, year, currency=currency)
+
+
+# ── Group / Splitwise services ─────────────────────────────────────────────
+
+@dataclass
+class ParsedGroupSplit:
+    amount:      Optional[float]      = None
+    description: Optional[str]        = None
+    ratios:      Optional[list[float]] = None   # None = equal split
+    members:     Optional[list[str]]   = None   # None = all group members
+    missing:     list[str]             = field(default_factory=list)
+
+
+def get_or_create_group(platform: str, chat_id: str, name: Optional[str], db: Session) -> GroupChat:
+    group = db.query(GroupChat).filter_by(platform=platform, chat_id=chat_id).first()
+    if group:
+        if name and group.name != name:
+            group.name = name
+            db.commit()
+        return group
+    group = GroupChat(platform=platform, chat_id=chat_id, name=name)
+    db.add(group)
+    db.commit()
+    db.refresh(group)
+    return group
+
+
+def get_or_create_member(
+    group: GroupChat,
+    platform_user_id: str,
+    display_name: str,
+    username: Optional[str],
+    user_id: Optional[int],
+    db: Session,
+) -> GroupMember:
+    member = db.query(GroupMember).filter_by(
+        group_chat_id=group.id, platform_user_id=platform_user_id
+    ).first()
+    if member:
+        # Update mutable fields
+        if display_name and member.display_name != display_name:
+            member.display_name = display_name
+        if username is not None and member.username != username:
+            member.username = username
+        if user_id is not None and member.user_id != user_id:
+            member.user_id = user_id
+        db.commit()
+        return member
+    member = GroupMember(
+        group_chat_id=group.id,
+        platform_user_id=platform_user_id,
+        display_name=display_name,
+        username=username,
+        user_id=user_id,
+    )
+    db.add(member)
+    db.commit()
+    db.refresh(member)
+    return member
+
+
+def _get_default_account(user_id: int, db: Session) -> Optional[Account]:
+    """Return the first active account owned by user_id."""
+    return (
+        db.query(Account)
+        .filter(Account.user_id == user_id, Account.is_active == True)
+        .order_by(Account.id)
+        .first()
+    )
+
+
+def create_group_expense(
+    group_chat_id: int,
+    paid_by_member_id: int,
+    amount: float,
+    description: str,
+    expense_date: date,
+    shares: list[dict],   # [{"member_id": int, "ratio": float}]
+    db: Session,
+) -> dict:
+    """
+    Create a GroupExpense with normalised shares.
+    For each share, if the member has a linked user_id, create a Transaction on their default account.
+    Returns a dict with expense info and computed share_amounts.
+    """
+    total_ratio = sum(s["ratio"] for s in shares) or 1.0
+
+    expense = GroupExpense(
+        group_chat_id=group_chat_id,
+        paid_by_member_id=paid_by_member_id,
+        amount=amount,
+        description=description,
+        date=expense_date,
+    )
+    db.add(expense)
+    db.flush()   # get expense.id without committing
+
+    payer = db.query(GroupMember).get(paid_by_member_id)
+    result_shares = []
+
+    for s in shares:
+        member = db.query(GroupMember).get(s["member_id"])
+        ratio  = s["ratio"]
+        share_amount = round(amount * ratio / total_ratio, 2)
+
+        txn_id = None
+        if member.user_id and member.id != paid_by_member_id:
+            # Non-payer member with a linked user: record their share as an expense
+            acc = _get_default_account(member.user_id, db)
+            if acc:
+                txn = Transaction(
+                    user_id=member.user_id,
+                    amount=share_amount,
+                    type=TransactionType.expense,
+                    description=f"[Group] {description}",
+                    date=expense_date,
+                    account_id=acc.id,
+                    source_plugin="telegram_group",
+                )
+                db.add(txn)
+                db.flush()
+                _apply_balance(db, txn, reverse=False)
+                txn_id = txn.id
+
+        share_row = GroupExpenseShare(
+            expense_id=expense.id,
+            member_id=s["member_id"],
+            share_ratio=ratio,
+            share_amount=share_amount,
+            is_settled=(s["member_id"] == paid_by_member_id),  # payer's share is settled
+            transaction_id=txn_id,
+        )
+        db.add(share_row)
+        result_shares.append({
+            "member_id":    s["member_id"],
+            "display_name": member.display_name,
+            "share_amount": share_amount,
+            "ratio":        ratio,
+        })
+
+    db.commit()
+    return {
+        "id":          expense.id,
+        "amount":      amount,
+        "description": description,
+        "date":        str(expense_date),
+        "paid_by":     payer.display_name if payer else paid_by_member_id,
+        "shares":      result_shares,
+    }
+
+
+def get_group_balances(group_chat_id: int, db: Session) -> list[dict]:
+    """
+    Compute net balances between every pair of members.
+    Returns list of {"from_member_id", "from_name", "to_member_id", "to_name", "amount"}
+    for pairs where one member owes the other (amount > 0).
+    """
+    # Net = for every unsettled share, the non-payer owes the payer share_amount
+    expenses = (
+        db.query(GroupExpense)
+        .filter(GroupExpense.group_chat_id == group_chat_id)
+        .all()
+    )
+
+    # net[a][b] = a owes b this much
+    from collections import defaultdict
+    net: dict[int, dict[int, float]] = defaultdict(lambda: defaultdict(float))
+
+    for exp in expenses:
+        payer_id = exp.paid_by_member_id
+        for share in exp.shares:
+            if share.is_settled or share.member_id == payer_id:
+                continue
+            net[share.member_id][payer_id] += share.share_amount
+
+    # Simplify: net[a][b] and net[b][a] — keep only the positive difference
+    result = []
+    seen = set()
+    members_cache: dict[int, GroupMember] = {}
+
+    def _member(mid):
+        if mid not in members_cache:
+            members_cache[mid] = db.query(GroupMember).get(mid)
+        return members_cache[mid]
+
+    all_pairs = [(fi, ti) for fi, targets in net.items() for ti in targets]
+    for from_id, to_id in all_pairs:
+        pair = tuple(sorted([from_id, to_id]))
+        if pair in seen:
+            continue
+        seen.add(pair)
+        amount = net[from_id][to_id]
+        reverse = net[to_id][from_id]
+        net_amount = round(amount - reverse, 2)
+        if net_amount > 0.01:
+            fm = _member(from_id)
+            tm = _member(to_id)
+            result.append({
+                "from_member_id": from_id,
+                "from_name":      fm.display_name if fm else str(from_id),
+                "to_member_id":   to_id,
+                "to_name":        tm.display_name if tm else str(to_id),
+                "amount":         net_amount,
+            })
+        elif net_amount < -0.01:
+            fm = _member(to_id)
+            tm = _member(from_id)
+            result.append({
+                "from_member_id": to_id,
+                "from_name":      fm.display_name if fm else str(to_id),
+                "to_member_id":   from_id,
+                "to_name":        tm.display_name if tm else str(from_id),
+                "amount":         round(-net_amount, 2),
+            })
+
+    return result
+
+
+def settle_group(
+    group_chat_id: int,
+    from_member_id: int,
+    to_member_id: int,
+    amount: float,
+    db: Session,
+) -> dict:
+    """
+    Mark unsettled shares as settled for the pair (from_member owes to_member).
+    Creates a settlement Transaction for from_member if they have a linked user.
+    """
+    expenses = (
+        db.query(GroupExpense)
+        .filter(GroupExpense.group_chat_id == group_chat_id)
+        .all()
+    )
+
+    settled_amount = 0.0
+    remaining = amount
+
+    for exp in expenses:
+        if exp.paid_by_member_id != to_member_id:
+            continue
+        for share in exp.shares:
+            if share.member_id != from_member_id or share.is_settled:
+                continue
+            if remaining <= 0:
+                break
+            settle = min(share.share_amount, remaining)
+            share.is_settled = True
+            settled_amount += settle
+            remaining -= settle
+
+    # Create a settlement transaction for the payer (from_member)
+    from_member = db.query(GroupMember).get(from_member_id)
+    if from_member and from_member.user_id:
+        acc = _get_default_account(from_member.user_id, db)
+        if acc:
+            txn = Transaction(
+                user_id=from_member.user_id,
+                amount=settled_amount,
+                type=TransactionType.expense,
+                description=f"[Group settle] paid back to {db.query(GroupMember).get(to_member_id).display_name}",
+                date=date.today(),
+                account_id=acc.id,
+                source_plugin="telegram_group",
+            )
+            db.add(txn)
+            db.flush()
+            _apply_balance(db, txn, reverse=False)
+
+    db.commit()
+    return {"settled_amount": round(settled_amount, 2)}
+
+
+def list_group_expenses(group_chat_id: int, db: Session) -> list[dict]:
+    expenses = (
+        db.query(GroupExpense)
+        .filter(GroupExpense.group_chat_id == group_chat_id)
+        .order_by(GroupExpense.date.desc(), GroupExpense.created_at.desc())
+        .all()
+    )
+    result = []
+    for exp in expenses:
+        result.append({
+            "id":          exp.id,
+            "amount":      exp.amount,
+            "description": exp.description,
+            "date":        str(exp.date),
+            "paid_by_member_id": exp.paid_by_member_id,
+            "paid_by_name":      exp.paid_by.display_name if exp.paid_by else None,
+            "shares": [
+                {
+                    "member_id":    s.member_id,
+                    "display_name": s.member.display_name if s.member else None,
+                    "share_amount": s.share_amount,
+                    "is_settled":   s.is_settled,
+                }
+                for s in exp.shares
+            ],
+        })
+    return result
+
+
+def get_simplified_balances(group_chat_id: int, db: Session) -> list[dict]:
+    """
+    Compute the minimal set of transfers that settle all debts (debt simplification).
+    Uses a greedy algorithm: at each step, the largest debtor pays the largest creditor.
+    Returns same dict shape as get_group_balances().
+    """
+    import heapq
+
+    # Step 1: net position per member (positive = owed money, negative = owes money)
+    expenses = (
+        db.query(GroupExpense)
+        .filter(GroupExpense.group_chat_id == group_chat_id)
+        .all()
+    )
+
+    net: dict[int, float] = {}
+    members_cache: dict[int, GroupMember] = {}
+
+    def _member(mid):
+        if mid not in members_cache:
+            members_cache[mid] = db.query(GroupMember).get(mid)
+        return members_cache[mid]
+
+    for exp in expenses:
+        payer_id = exp.paid_by_member_id
+        for share in exp.shares:
+            if share.is_settled or share.member_id == payer_id:
+                continue
+            # payer is owed this share, non-payer owes it
+            net[payer_id]       = net.get(payer_id, 0.0)       + share.share_amount
+            net[share.member_id] = net.get(share.member_id, 0.0) - share.share_amount
+
+    # Step 2: greedy matching — max-heap for creditors, min-heap for debtors
+    # Python heapq is min-heap; negate for max-heap behaviour
+    creditors = []   # (-amount, member_id)
+    debtors   = []   # (-amount, member_id)  i.e. amount is actually negative, store positive
+
+    for mid, amount in net.items():
+        amount = round(amount, 2)
+        if amount > 0.01:
+            heapq.heappush(creditors, (-amount, mid))
+        elif amount < -0.01:
+            heapq.heappush(debtors, (amount, mid))   # amount is negative → smallest first = largest debt
+
+    result = []
+
+    while creditors and debtors:
+        cred_amt, cred_id   = heapq.heappop(creditors)
+        debt_amt, debt_id   = heapq.heappop(debtors)
+        cred_amt = -cred_amt   # restore positive
+        debt_amt = -debt_amt   # restore positive (was stored negative)
+
+        transfer = round(min(cred_amt, debt_amt), 2)
+        fm = _member(debt_id)
+        tm = _member(cred_id)
+        result.append({
+            "from_member_id": debt_id,
+            "from_name":      fm.display_name if fm else str(debt_id),
+            "to_member_id":   cred_id,
+            "to_name":        tm.display_name if tm else str(cred_id),
+            "amount":         transfer,
+        })
+
+        leftover_cred = round(cred_amt - transfer, 2)
+        leftover_debt = round(debt_amt - transfer, 2)
+
+        if leftover_cred > 0.01:
+            heapq.heappush(creditors, (-leftover_cred, cred_id))
+        if leftover_debt > 0.01:
+            heapq.heappush(debtors, (-leftover_debt, debt_id))
+
+    return result
+
+
+def close_group(group_chat_id: int, use_simplified: bool, db: Session) -> dict:
+    """
+    Close a group by converting all unsettled balances into Lending entries,
+    then marking the group as closed.
+
+    - use_simplified=True  → creates lending entries per simplified (minimised) balance
+    - use_simplified=False → creates lending entries per actual pairwise balance
+
+    Only creates entries where both sides have a linked user_id.
+    Guest-only balances are noted but skipped (no account to attach lending to).
+    """
+    balances = (
+        get_simplified_balances(group_chat_id, db)
+        if use_simplified
+        else get_group_balances(group_chat_id, db)
+    )
+
+    members = {m.id: m for m in db.query(GroupMember).filter_by(group_chat_id=group_chat_id).all()}
+
+    today = date.today()
+    created = []
+    skipped = []
+
+    for b in balances:
+        from_member = members.get(b["from_member_id"])
+        to_member   = members.get(b["to_member_id"])
+
+        # "from" owes "to" — create:
+        #   lent entry for "to" (they are owed money)
+        #   borrowed entry for "from" (they owe money)
+
+        note = f"[Group close] {from_member.display_name if from_member else '?'} → {to_member.display_name if to_member else '?'}"
+
+        if to_member and to_member.user_id:
+            # Payer's (creditor's) lending: they lent money
+            l = Lending(
+                user_id=to_member.user_id,
+                person_name=from_member.display_name if from_member else "Unknown",
+                type=LendingType.lent,
+                amount=b["amount"],
+                amount_settled=0.0,
+                date=today,
+                is_settled=False,
+                note=note,
+            )
+            db.add(l)
+            created.append(f"{to_member.display_name} lent {b['amount']} to {from_member.display_name if from_member else '?'}")
+
+        if from_member and from_member.user_id:
+            # Debtor's lending: they borrowed money
+            l = Lending(
+                user_id=from_member.user_id,
+                person_name=to_member.display_name if to_member else "Unknown",
+                type=LendingType.borrowed,
+                amount=b["amount"],
+                amount_settled=0.0,
+                date=today,
+                is_settled=False,
+                note=note,
+            )
+            db.add(l)
+
+        if not (to_member and to_member.user_id) and not (from_member and from_member.user_id):
+            skipped.append(b)
+
+    # Mark all shares as settled and close the group
+    for exp in db.query(GroupExpense).filter_by(group_chat_id=group_chat_id).all():
+        for share in exp.shares:
+            share.is_settled = True
+
+    group = db.query(GroupChat).get(group_chat_id)
+    if group:
+        group.is_closed = True
+
+    db.commit()
+
+    return {
+        "ok":      True,
+        "created": len(created),
+        "skipped": len(skipped),
+        "mode":    "simplified" if use_simplified else "actual",
+    }
+
+
+def get_group_members(group_chat_id: int, db: Session) -> list[dict]:
+    members = (
+        db.query(GroupMember)
+        .filter(GroupMember.group_chat_id == group_chat_id)
+        .all()
+    )
+    return [
+        {
+            "id":               m.id,
+            "platform_user_id": m.platform_user_id,
+            "display_name":     m.display_name,
+            "username":         m.username,
+            "user_id":          m.user_id,
+            "is_guest":         (m.user.is_guest if m.user else True),
+        }
+        for m in members
+    ]
+
+
+def get_user_groups(user_id: int, db: Session) -> list[dict]:
+    """Return all groups where the user is a member."""
+    members = db.query(GroupMember).filter(GroupMember.user_id == user_id).all()
+    seen = set()
+    result = []
+    for m in members:
+        if m.group_chat_id in seen:
+            continue
+        seen.add(m.group_chat_id)
+        g = m.group
+        result.append({
+            "id":        g.id,
+            "name":      g.name or f"Group {g.chat_id}",
+            "platform":  g.platform,
+            "chat_id":   g.chat_id,
+            "is_closed": g.is_closed,
+        })
+    return result
+
+
+def parse_group_split_with_ai(text: str, member_names: list[str]) -> ParsedGroupSplit:
+    """
+    Parse a group split message.
+    Handles:
+      - "split 1200 lunch" → equal split among all
+      - "split 1200 lunch between Alice, Bob" → named members, equal split
+      - "split 1200 lunch 1:2:3 between Alice, Bob, Priya" → ratio split
+    """
+    import json
+    from litellm import completion
+
+    names_str = ", ".join(member_names) if member_names else "all members"
+    prompt = f"""You are a group expense splitter. Parse the user's message into a JSON split request.
+
+Group members available: {names_str}
+
+Return ONLY a JSON object:
+{{
+  "amount":      <number or null>,
+  "description": <string or null>,
+  "members":     <list of names from the group, or null if all members>,
+  "ratios":      <list of numbers matching members order, or null for equal split>,
+  "missing":     ["amount"] if amount is missing else []
+}}
+
+Rules:
+- "split 1200 lunch" → amount=1200, description="lunch", members=null, ratios=null
+- "split 1200 lunch between Alice, Bob" → members=["Alice","Bob"], ratios=null
+- "split 1200 lunch 1:2:3 between Alice, Bob, Priya" → ratios=[1,2,3], members=["Alice","Bob","Priya"]
+- "paid 1200 for lunch, split equally" → same as first case
+- Match member names case-insensitively against the available members list
+- description is never null — infer from context
+- ratios must have same length as members if both are provided
+
+User message: {text}"""
+
+    resp = completion(
+        model="anthropic/claude-haiku-4-5",
+        messages=[{"role": "user", "content": prompt}],
+        max_tokens=300,
+    )
+    raw = resp.choices[0].message.content.strip()
+    if raw.startswith("```"):
+        raw = raw.split("```")[1]
+        if raw.startswith("json"):
+            raw = raw[4:]
+    data = json.loads(raw.strip())
+
+    return ParsedGroupSplit(
+        amount      = data.get("amount"),
+        description = data.get("description"),
+        members     = data.get("members"),
+        ratios      = data.get("ratios"),
+        missing     = data.get("missing", []),
+    )

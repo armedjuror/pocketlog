@@ -68,6 +68,11 @@ class TelegramPlugin(AuthFlowMixin, BasePlugin):
             "  `borrowed 5000 from Priya`\n"
             "  `who owes me` — unsettled lent amounts\n"
             "  `what do I owe` — unsettled borrowed amounts\n\n"
+            "*Group splits (in group chats):*\n"
+            "  `split 1200 lunch` — split equally among all\n"
+            "  `split 1200 lunch between Alice, Bob` — named split\n"
+            "  `split 1200 lunch 1:2:3 between Alice, Bob, Priya` — ratio split\n"
+            "  /groupbalance — show who owes whom\n\n"
             "*Quick queries:*\n"
             "  `my accounts` — balances\n"
             "  `my categories` — list categories\n"
@@ -333,6 +338,222 @@ class TelegramPlugin(AuthFlowMixin, BasePlugin):
         warning = self.budget_warning(parsed, db, user_id=msg.user_id)
         await self.send_message(msg.chat_id, (parsed.reply or "Logged!") + warning)
 
+    # ── Group / Splitwise handlers ─────────────────────────────────────────
+
+    async def handle_group_message(
+        self, msg: InboundMessage, group_payload: dict, db: Session
+    ) -> None:
+        """Entry point for messages from Telegram group/supergroup chats."""
+        import re
+        from services import (
+            get_or_create_group, get_or_create_member,
+            get_user_currency, currency_symbol,
+        )
+        import auth_service as _auth
+
+        message   = group_payload.get("message", {})
+        chat      = message.get("chat", {})
+        from_user = message.get("from", {})
+
+        chat_id_str      = str(chat.get("id", ""))
+        chat_title       = chat.get("title", "")
+        platform_user_id = str(from_user.get("id", ""))
+        display_name     = (
+            " ".join(filter(None, [from_user.get("first_name"), from_user.get("last_name")]))
+            or from_user.get("username", "Unknown")
+        )
+        username = from_user.get("username")   # without @
+
+        # Get/create the GroupChat record
+        group = get_or_create_group("telegram", chat_id_str, chat_title, db)
+
+        # Look up whether this sender has a registered PocketLog account
+        linked_user = _auth.get_user_by_bot("telegram", platform_user_id, db)
+        user_id = linked_user.id if linked_user else None
+
+        # If not registered, create a guest user so they can be included in splits
+        if user_id is None:
+            guest = _auth.get_or_create_guest_user(
+                "telegram", platform_user_id, display_name, db
+            )
+            user_id = guest.id
+
+        # Get/create GroupMember
+        member = get_or_create_member(group, platform_user_id, display_name, username, user_id, db)
+
+        text = (msg.text or "").strip()
+
+        # Route to group-specific handlers
+        handled = await self.maybe_handle_group_split(msg, group, member, db)
+        if handled:
+            return
+
+        handled = await self.maybe_handle_group_balance(msg, group, db)
+        if handled:
+            return
+
+        # Ignore other group messages silently (don't reply to every group message)
+
+    async def maybe_handle_group_split(
+        self, msg: InboundMessage, group, sender_member, db: Session
+    ) -> bool:
+        """
+        Detect and handle split commands in group chats.
+        Returns True if handled.
+        """
+        import re
+        from datetime import date as _date
+        from services import (
+            parse_group_split_with_ai, create_group_expense,
+            get_group_members, get_user_currency, currency_symbol,
+        )
+        import auth_service as _auth
+
+        text = (msg.text or "").strip()
+
+        # Trigger pattern: starts with "split" or contains "split ... between"
+        if not re.search(r'^\s*split\b|\bsplit\b.{0,60}\bbetween\b', text, re.IGNORECASE):
+            return False
+
+        # Collect all group members for name resolution
+        all_members = get_group_members(group.id, db)
+        member_names = [m["display_name"] for m in all_members]
+        if not member_names:
+            member_names = [sender_member.display_name]
+
+        try:
+            parsed = parse_group_split_with_ai(text, member_names)
+        except Exception as exc:
+            log.exception("Group split AI parse failed")
+            await self.send_message(msg.chat_id, f"Couldn't parse the split: {exc}")
+            return True
+
+        if parsed.missing or parsed.amount is None:
+            await self.send_message(msg.chat_id, "Please include the amount — e.g. `split 1200 lunch`")
+            return True
+
+        # Resolve member names to GroupMember records
+        def _fuzzy_find(name: str):
+            name_lower = name.lower()
+            # Exact display_name match first
+            for m in all_members:
+                if m["display_name"].lower() == name_lower:
+                    return m
+            # Username match
+            for m in all_members:
+                if m.get("username") and m["username"].lower() == name_lower.lstrip("@"):
+                    return m
+            # Partial match
+            for m in all_members:
+                if name_lower in m["display_name"].lower() or m["display_name"].lower() in name_lower:
+                    return m
+            return None
+
+        if parsed.members:
+            resolved = []
+            unresolved = []
+            for name in parsed.members:
+                m = _fuzzy_find(name)
+                if m:
+                    resolved.append(m)
+                else:
+                    unresolved.append(name)
+
+            if unresolved:
+                # Create guest users for unresolved @mentions
+                for name in unresolved:
+                    clean = name.lstrip("@")
+                    # Check if it looks like a username
+                    guest = _auth.get_or_create_guest_user("telegram", f"guest_{clean}", clean, db)
+                    from services import get_or_create_member as _gom
+                    gm = _gom(group, f"guest_{clean}", clean, clean, guest.id, db)
+                    resolved.append({
+                        "id": gm.id, "display_name": gm.display_name,
+                        "username": gm.username, "user_id": gm.user_id, "is_guest": True,
+                    })
+                    await self.send_message(
+                        msg.chat_id,
+                        f"👋 @{clean} — you've been added to a split! "
+                        f"DM me /start to register and see your balance.",
+                    )
+        else:
+            # All members
+            resolved = all_members
+
+        if not resolved:
+            await self.send_message(msg.chat_id, "No members found to split among.")
+            return True
+
+        # Build shares list
+        if parsed.ratios and len(parsed.ratios) == len(resolved):
+            shares = [{"member_id": m["id"], "ratio": r} for m, r in zip(resolved, parsed.ratios)]
+        else:
+            shares = [{"member_id": m["id"], "ratio": 1.0} for m in resolved]
+
+        # Ensure sender (payer) is included
+        payer_ids = [s["member_id"] for s in shares]
+        if sender_member.id not in payer_ids:
+            shares.append({"member_id": sender_member.id, "ratio": 1.0})
+
+        try:
+            result = create_group_expense(
+                group_chat_id=group.id,
+                paid_by_member_id=sender_member.id,
+                amount=parsed.amount,
+                description=parsed.description or "group expense",
+                expense_date=_date.today(),
+                shares=shares,
+                db=db,
+            )
+        except Exception as exc:
+            log.exception("create_group_expense failed")
+            await self.send_message(msg.chat_id, f"Failed to save split: {exc}")
+            return True
+
+        # Format confirmation
+        from services import get_user_currency, currency_symbol
+        sym = currency_symbol(get_user_currency(db, sender_member.user_id))
+        lines = [f"Split *{sym}{parsed.amount:,.0f}* — _{parsed.description}_"]
+        for s in result["shares"]:
+            suffix = " (guest)" if not any(
+                m["id"] == s["member_id"] and not m.get("is_guest") for m in all_members
+            ) else ""
+            lines.append(f"  {s['display_name']}{suffix}: {sym}{s['share_amount']:,.0f}")
+        await self.send_message(msg.chat_id, "\n".join(lines))
+        return True
+
+    async def maybe_handle_group_balance(
+        self, msg: InboundMessage, group, db: Session
+    ) -> bool:
+        """
+        Handle /groupbalance or "who owes what" in group chats.
+        Returns True if handled.
+        """
+        import re
+        text = (msg.text or "").strip()
+        if not re.search(r'^/groupbalance\b|who\s+owes\s+(what|whom)', text, re.IGNORECASE):
+            return False
+
+        from services import get_group_balances, get_user_currency, currency_symbol, get_group_members
+        # Use first member's currency as group currency (best effort)
+        members = get_group_members(group.id, db)
+        sym = "₹"  # default; try to get from first registered member
+        for m in members:
+            if m.get("user_id"):
+                sym = currency_symbol(get_user_currency(db, m["user_id"]))
+                break
+
+        balances = get_group_balances(group.id, db)
+        if not balances:
+            await self.send_message(msg.chat_id, "All settled up! 🎉 No outstanding balances.")
+            return True
+
+        lines = ["*Group balances:*\n"]
+        for b in balances:
+            lines.append(f"  {b['from_name']} → {b['to_name']}: {sym}{b['amount']:,.0f}")
+        await self.send_message(msg.chat_id, "\n".join(lines))
+        return True
+
 
 # Singleton plugin instance
 _plugin = TelegramPlugin()
@@ -342,12 +563,16 @@ _plugin = TelegramPlugin()
 async def telegram_webhook(request: Request, db: Session = Depends(get_db)):
     payload = await request.json()
     message = payload.get("message", {})
-    chat_id = str(message.get("chat", {}).get("id", ""))
+    chat    = message.get("chat", {})
+    chat_id = str(chat.get("id", ""))
     msg_id  = str(message.get("message_id", ""))
     text    = message.get("text", "") or message.get("caption", "")
 
     if not chat_id:
         return {"ok": False, "reason": "no chat_id"}
+
+    chat_type = chat.get("type", "private")
+    is_group  = chat_type in ("group", "supergroup")
 
     msg = InboundMessage(
         text       = text or None,
@@ -355,12 +580,16 @@ async def telegram_webhook(request: Request, db: Session = Depends(get_db)):
         chat_id    = chat_id,
         raw        = payload,
     )
+
     async def _handle_in_background():
-        db = SessionLocal()
+        _db = SessionLocal()
         try:
-            await _plugin.handle(msg, db)
+            if is_group:
+                await _plugin.handle_group_message(msg, payload, _db)
+            else:
+                await _plugin.handle(msg, _db)
         finally:
-            db.close()
+            _db.close()
 
     asyncio.create_task(_handle_in_background())
     return {"ok": True}

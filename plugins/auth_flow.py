@@ -98,7 +98,7 @@ class AuthFlowMixin:
         if user is None:
             await self.send_message(
                 chat_id,
-                "Welcome to Hisaab!\n\nLet's set up your account. What's your name?",
+                "Welcome to PocketLog!\n\nLet's set up your account. What's your name?",
             )
             auth_service.set_bot_state(platform, chat_id, "awaiting_name", db)
             return None
@@ -261,8 +261,17 @@ class AuthFlowMixin:
 
         name     = state_row.temp_name or "User"
         email    = state_row.temp_email
-        user     = auth_service.create_user(name=name, email=email, primary_bot=platform, db=db, currency=code)
-        auth_service.link_bot_identity(user.id, platform, chat_id, db)
+
+        # Check if this chat_id is already a guest identity — if so, merge instead of create
+        existing_identity = db.query(
+            __import__("models", fromlist=["BotIdentity"]).BotIdentity
+        ).filter_by(platform=platform, chat_id=chat_id).first()
+
+        if existing_identity and existing_identity.user and existing_identity.user.is_guest:
+            user = auth_service.merge_guest_user(existing_identity.user, name, email, code, db)
+        else:
+            user = auth_service.create_user(name=name, email=email, primary_bot=platform, db=db, currency=code)
+            auth_service.link_bot_identity(user.id, platform, chat_id, db)
         auth_service.create_session(user.id, db)
         from services import create_account
         from models import AccountType
