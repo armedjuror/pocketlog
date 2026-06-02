@@ -77,16 +77,17 @@ def get_user_currency(db: Session, user_id: Optional[int]) -> str:
 @dataclass
 class ParsedTransaction:
     """What an AI parser returns; not yet saved."""
-    amount:       Optional[float]  = None
-    description:  Optional[str]    = None
-    account_id:   Optional[int]    = None
-    category_id:  Optional[int]    = None
-    date:         Optional[date]   = None
-    type:         str              = "expense"
-    note:         Optional[str]    = None
-    missing:      list[str]        = field(default_factory=list)
-    reply:        str              = ""
-    chat:         bool             = False  # True when message is conversational, not a transaction
+    amount:         Optional[float]  = None
+    description:    Optional[str]    = None
+    account_id:     Optional[int]    = None
+    to_account_id:  Optional[int]    = None
+    category_id:    Optional[int]    = None
+    date:           Optional[date]   = None
+    type:           str              = "expense"
+    note:           Optional[str]    = None
+    missing:        list[str]        = field(default_factory=list)
+    reply:          str              = ""
+    chat:           bool             = False  # True when message is conversational, not a transaction
 
 
 @dataclass
@@ -792,7 +793,12 @@ def parse_message_with_ai(
     from litellm import completion
 
     today_str      = (today or date.today()).isoformat()
-    accounts_str   = ", ".join(f"{a['id']}:{a['name']}({a['type']})" for a in accounts)
+    def _acc_str(a):
+        s = f"{a['id']}:{a['name']}({a['type']})"
+        if a.get('monthly_emi'):
+            s += f"[emi={a['monthly_emi']}]"
+        return s
+    accounts_str   = ", ".join(_acc_str(a) for a in accounts)
     categories_str = ", ".join(f"{c['id']}:{c['name']}" for c in categories)
 
     prompt = f"""You are PocketLog, a friendly personal finance assistant bot. Your primary job is logging expenses and income, but you also chat naturally.
@@ -802,16 +808,17 @@ Categories (id:name):     {categories_str}
 
 Return ONLY a JSON object — no markdown fences:
 {{
-  "chat":        true | false,
-  "amount":      <number or null>,
-  "description": <string or null>,
-  "account_id":  <int or null>,
-  "category_id": <int or null>,
-  "date":        "<YYYY-MM-DD>" or null,
-  "type":        "expense" | "income" | "transfer",
-  "note":        <string or null>,
-  "missing":     ["amount"|"account_id"|"category_id"],
-  "reply":       "<response to user>"
+  "chat":           true | false,
+  "amount":         <number or null>,
+  "description":    <string or null>,
+  "account_id":     <int or null>,
+  "to_account_id":  <int or null>,
+  "category_id":    <int or null>,
+  "date":           "<YYYY-MM-DD>" or null,
+  "type":           "expense" | "income" | "transfer",
+  "note":           <string or null>,
+  "missing":        ["amount"|"account_id"|"category_id"],
+  "reply":          "<response to user>"
 }}
 
 Rules:
@@ -821,6 +828,8 @@ Rules:
 - description is NEVER missing for transactions — always infer a sensible summary.
 - Prefer the most specific matching account/category.
 - Default date to today if not mentioned.
+- If two accounts are mentioned (e.g. "from X to Y", "paid to Y from X"), set type="transfer", account_id=source account, to_account_id=destination account.
+- If the user mentions "EMI" and no amount is given, use the account's emi value (shown as [emi=X] in the accounts list) as the amount. Do NOT add "amount" to missing[] in this case.
 - If the message starts with "RECEIPT:" it is raw OCR from a scanned receipt. Be lenient with OCR noise and extract what you can.
 - For receipt OCR: pack ALL reference codes into note — ticket numbers, route numbers, invoice IDs, etc. Comma-separate them.
 
@@ -839,16 +848,17 @@ User message: {text}"""
     data = json.loads(raw.strip())
 
     return ParsedTransaction(
-        chat        = bool(data.get("chat", False)),
-        amount      = data.get("amount"),
-        description = data.get("description") or "",
-        account_id  = data.get("account_id"),
-        category_id = data.get("category_id"),
-        date        = date.fromisoformat(data["date"]) if data.get("date") else (today or date.today()),
-        type        = data.get("type") or "expense",
-        note        = data.get("note"),
-        missing     = data.get("missing", []),
-        reply       = data.get("reply", ""),
+        chat           = bool(data.get("chat", False)),
+        amount         = data.get("amount"),
+        description    = data.get("description") or "",
+        account_id     = data.get("account_id"),
+        to_account_id  = data.get("to_account_id"),
+        category_id    = data.get("category_id"),
+        date           = date.fromisoformat(data["date"]) if data.get("date") else (today or date.today()),
+        type           = data.get("type") or "expense",
+        note           = data.get("note"),
+        missing        = data.get("missing", []),
+        reply          = data.get("reply", ""),
     )
 
 
@@ -1147,6 +1157,162 @@ def get_or_create_member(
     db.commit()
     db.refresh(member)
     return member
+
+
+def create_web_group(name: str, creator_user_id: int, db: Session) -> dict:
+    """Create a group from the web dashboard (platform='web')."""
+    import uuid
+    chat_id = f"web_{uuid.uuid4().hex[:12]}"
+    group = GroupChat(platform="web", chat_id=chat_id, name=name)
+    db.add(group)
+    db.flush()
+    # Add creator as first member
+    from models import User
+    creator = db.query(User).get(creator_user_id)
+    member = GroupMember(
+        group_chat_id=group.id,
+        platform_user_id=f"user_{creator_user_id}",
+        display_name=creator.name if creator else "Me",
+        username=None,
+        user_id=creator_user_id,
+    )
+    db.add(member)
+    db.commit()
+    db.refresh(group)
+    return {"id": group.id, "name": group.name, "platform": group.platform,
+            "is_closed": group.is_closed, "created_at": str(group.created_at)}
+
+
+def add_group_member_web(
+    group_chat_id: int,
+    display_name: str,
+    email: Optional[str],
+    inviter_name: str,
+    telegram_bot: Optional[str],
+    db: Session,
+) -> dict:
+    """Add a named member (registered or guest) to a group from the web dashboard."""
+    from models import User as _User
+    user_id = None
+    resolved_name = display_name.strip()
+
+    if email:
+        email = email.strip().lower()
+        user = db.query(_User).filter_by(email=email).first()
+        if user:
+            user_id = user.id
+            if not resolved_name:
+                resolved_name = user.name
+        else:
+            # Create a guest User so they can sign up later and be auto-linked
+            guest = _User(name=resolved_name, email=email, is_guest=True)
+            db.add(guest)
+            db.flush()
+            user_id = guest.id
+
+    slug = resolved_name.lower().replace(" ", "_")
+    platform_user_id = f"user_{user_id}" if user_id else f"guest_{slug}_{group_chat_id}"
+
+    existing = db.query(GroupMember).filter_by(
+        group_chat_id=group_chat_id, platform_user_id=platform_user_id
+    ).first()
+    if existing:
+        return {"id": existing.id, "display_name": existing.display_name,
+                "is_guest": existing.user_id is None, "already_exists": True}
+
+    member = GroupMember(
+        group_chat_id=group_chat_id,
+        platform_user_id=platform_user_id,
+        display_name=resolved_name,
+        username=None,
+        user_id=user_id,
+    )
+    db.add(member)
+    db.commit()
+    db.refresh(member)
+
+    # Send invite email if address provided
+    if email:
+        group = db.query(GroupChat).get(group_chat_id)
+        try:
+            from email_service import send_group_invite_email
+            send_group_invite_email(
+                to_email=email,
+                member_name=resolved_name,
+                group_name=group.name if group else "the group",
+                inviter_name=inviter_name,
+                telegram_bot=telegram_bot or "",
+            )
+        except Exception:
+            pass  # non-fatal
+
+    return {"id": member.id, "display_name": member.display_name,
+            "is_guest": member.user_id is None, "already_exists": False}
+
+
+def delete_group_member(member_id: int, group_chat_id: int, db: Session) -> dict:
+    """Delete a group member. Blocks if they have unsettled shares."""
+    member = db.query(GroupMember).filter_by(id=member_id, group_chat_id=group_chat_id).first()
+    if not member:
+        return {"ok": False, "error": "Member not found"}
+    unsettled = db.query(GroupExpenseShare).filter_by(
+        member_id=member_id, is_settled=False
+    ).count()
+    if unsettled:
+        return {"ok": False, "error": f"Member has {unsettled} unsettled transaction(s). Settle first."}
+    db.delete(member)
+    db.commit()
+    return {"ok": True}
+
+
+def delete_group(group_chat_id: int, db: Session) -> bool:
+    """
+    Delete a group and all associated data:
+    expenses, shares, members, and any linked transactions.
+    """
+    group = db.query(GroupChat).get(group_chat_id)
+    if not group:
+        return False
+
+    # Collect expense IDs
+    expense_ids = [
+        row.id for row in db.query(GroupExpense).filter_by(group_chat_id=group_chat_id).all()
+    ]
+
+    txn_ids = []
+    if expense_ids:
+        shares = db.query(GroupExpenseShare).filter(
+            GroupExpenseShare.expense_id.in_(expense_ids)
+        ).all()
+        txn_ids = [s.transaction_id for s in shares if s.transaction_id]
+        # Delete shares first (FK child of expenses)
+        db.query(GroupExpenseShare).filter(
+            GroupExpenseShare.expense_id.in_(expense_ids)
+        ).delete(synchronize_session=False)
+        # Now safe to delete expenses
+        db.query(GroupExpense).filter(GroupExpense.id.in_(expense_ids)).delete(synchronize_session=False)
+
+    # Delete linked transactions
+    if txn_ids:
+        db.query(Transaction).filter(Transaction.id.in_(txn_ids)).delete(synchronize_session=False)
+
+    # Delete members
+    db.query(GroupMember).filter_by(group_chat_id=group_chat_id).delete(synchronize_session=False)
+
+    # Delete group
+    db.delete(group)
+    db.commit()
+    return True
+
+
+def delete_group_expense(expense_id: int, group_chat_id: int, db: Session) -> bool:
+    """Delete a group expense and its shares. Returns True if deleted."""
+    exp = db.query(GroupExpense).filter_by(id=expense_id, group_chat_id=group_chat_id).first()
+    if not exp:
+        return False
+    db.delete(exp)
+    db.commit()
+    return True
 
 
 def _get_default_account(user_id: int, db: Session) -> Optional[Account]:
@@ -1587,7 +1753,9 @@ def get_user_groups(user_id: int, db: Session) -> list[dict]:
     return result
 
 
-def parse_group_split_with_ai(text: str, member_names: list[str]) -> ParsedGroupSplit:
+def parse_group_split_with_ai(
+    text: str, member_names: list[str], sender_name: str = "me"
+) -> ParsedGroupSplit:
     """
     Parse a group split message.
     Handles:
@@ -1601,6 +1769,7 @@ def parse_group_split_with_ai(text: str, member_names: list[str]) -> ParsedGroup
     names_str = ", ".join(member_names) if member_names else "all members"
     prompt = f"""You are a group expense splitter. Parse the user's message into a JSON split request.
 
+The sender's name is: {sender_name}
 Group members available: {names_str}
 
 Return ONLY a JSON object:
@@ -1617,6 +1786,10 @@ Rules:
 - "split 1200 lunch between Alice, Bob" → members=["Alice","Bob"], ratios=null
 - "split 1200 lunch 1:2:3 between Alice, Bob, Priya" → ratios=[1,2,3], members=["Alice","Bob","Priya"]
 - "paid 1200 for lunch, split equally" → same as first case
+- "equally" or "among all" or "us" or "we" or "everyone" → members=null (split among all)
+- "me", "I", "myself" always refers to the sender: {sender_name}
+- "me and X" → members=["{sender_name}", "X"]
+- "between us" in a 2-person context → members=null
 - Match member names case-insensitively against the available members list
 - description is never null — infer from context
 - ratios must have same length as members if both are provided
@@ -1642,3 +1815,48 @@ User message: {text}"""
         ratios      = data.get("ratios"),
         missing     = data.get("missing", []),
     )
+
+
+def detect_natural_group_expense(text: str) -> tuple[float, str] | None:
+    """
+    Detect if a message is a natural expense statement (e.g. 'breakfast 100').
+    Returns (amount, description) or None if not an expense.
+    """
+    import json
+    from litellm import completion
+
+    prompt = f"""Decide if the following message is describing an expense/purchase with an amount.
+If yes, extract the amount and a short description.
+If no, return null.
+
+Return ONLY a JSON object or null:
+{{"amount": <number>, "description": <short string>}}
+
+Examples:
+- "breakfast 100" → {{"amount": 100, "description": "breakfast"}}
+- "paid 500 for taxi" → {{"amount": 500, "description": "taxi"}}
+- "hello everyone" → null
+- "who owes me" → null
+- "equally" → null
+
+Message: {text}"""
+
+    resp = completion(
+        model="anthropic/claude-haiku-4-5",
+        messages=[{"role": "user", "content": prompt}],
+        max_tokens=100,
+    )
+    raw = resp.choices[0].message.content.strip()
+    if raw.lower() in ("null", "none", ""):
+        return None
+    if raw.startswith("```"):
+        raw = raw.split("```")[1]
+        if raw.startswith("json"):
+            raw = raw[4:]
+    try:
+        data = json.loads(raw.strip())
+    except Exception:
+        return None
+    if not data or data.get("amount") is None:
+        return None
+    return (float(data["amount"]), data.get("description") or "expense")

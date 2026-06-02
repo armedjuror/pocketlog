@@ -8,6 +8,7 @@ Responsibilities:
   - NO business logic here — that all lives in services.py
 """
 
+import os
 from datetime import date
 from typing import Optional
 
@@ -206,6 +207,17 @@ def web_verify_otp(data: WebOTPVerify, response: Response, db: Session = Depends
         path     = "/",
     )
     return {"ok": True, "name": user.name}
+
+
+@app.get("/api/lookup-user", include_in_schema=False)
+def lookup_user(email: str, db: Session = Depends(get_db), web_user=Depends(get_web_user)):
+    if not web_user:
+        raise HTTPException(401, "Not authenticated")
+    from models import User as _User
+    user = db.query(_User).filter_by(email=email.strip().lower()).first()
+    if not user:
+        return {"found": False}
+    return {"found": True, "name": user.name}
 
 
 @app.get("/api/me", include_in_schema=False)
@@ -498,12 +510,35 @@ class GroupSettleIn(BaseModel):
 class GroupCloseIn(BaseModel):
     use_simplified: bool = True
 
+class GroupCreateIn(BaseModel):
+    name: str
+
+class GroupMemberAddIn(BaseModel):
+    display_name: str
+    email: Optional[str] = None
+
+class GroupExpenseAddIn(BaseModel):
+    paid_by_member_id: int
+    amount: float
+    description: str
+    date: str
+    shares: list[dict]   # [{"member_id": int, "ratio": float}]
+
 
 @app.get("/api/groups", include_in_schema=False)
 def list_groups(db: Session = Depends(get_db), web_user=Depends(get_web_user)):
     if not web_user:
         raise HTTPException(401, "Not authenticated")
     return services.get_user_groups(web_user.id, db)
+
+
+@app.post("/api/groups", include_in_schema=False)
+def create_group(data: GroupCreateIn, db: Session = Depends(get_db), web_user=Depends(get_web_user)):
+    if not web_user:
+        raise HTTPException(401, "Not authenticated")
+    if not data.name.strip():
+        raise HTTPException(400, "Name required")
+    return services.create_web_group(data.name.strip(), web_user.id, db)
 
 
 @app.get("/api/groups/{gid}/members", include_in_schema=False)
@@ -552,6 +587,79 @@ def close_group(gid: int, data: GroupCloseIn, db: Session = Depends(get_db), web
     if not any(m["user_id"] == web_user.id for m in members):
         raise HTTPException(403, "Not a member of this group")
     return services.close_group(gid, data.use_simplified, db)
+
+
+@app.post("/api/groups/{gid}/members", include_in_schema=False)
+def add_group_member(gid: int, data: GroupMemberAddIn, db: Session = Depends(get_db), web_user=Depends(get_web_user)):
+    if not web_user:
+        raise HTTPException(401, "Not authenticated")
+    members = services.get_group_members(gid, db)
+    if not any(m["user_id"] == web_user.id for m in members):
+        raise HTTPException(403, "Not a member of this group")
+    telegram_bot = os.getenv("TELEGRAM_BOT_USERNAME", "")
+    return services.add_group_member_web(
+        gid, data.display_name.strip(), data.email,
+        inviter_name=web_user.name, telegram_bot=telegram_bot, db=db,
+    )
+
+
+@app.delete("/api/groups/{gid}/members/{mid}", include_in_schema=False)
+def remove_group_member(gid: int, mid: int, db: Session = Depends(get_db), web_user=Depends(get_web_user)):
+    if not web_user:
+        raise HTTPException(401, "Not authenticated")
+    members = services.get_group_members(gid, db)
+    if not any(m["user_id"] == web_user.id for m in members):
+        raise HTTPException(403, "Not a member of this group")
+    result = services.delete_group_member(mid, gid, db)
+    if not result["ok"]:
+        raise HTTPException(400, result["error"])
+    return {"ok": True}
+
+
+@app.post("/api/groups/{gid}/expenses", include_in_schema=False)
+def add_group_expense(gid: int, data: GroupExpenseAddIn, db: Session = Depends(get_db), web_user=Depends(get_web_user)):
+    if not web_user:
+        raise HTTPException(401, "Not authenticated")
+    members = services.get_group_members(gid, db)
+    if not any(m["user_id"] == web_user.id for m in members):
+        raise HTTPException(403, "Not a member of this group")
+    from datetime import date as _date
+    expense_date = _date.fromisoformat(data.date) if data.date else _date.today()
+    return services.create_group_expense(
+        group_chat_id=gid,
+        paid_by_member_id=data.paid_by_member_id,
+        amount=data.amount,
+        description=data.description,
+        expense_date=expense_date,
+        shares=data.shares,
+        db=db,
+    )
+
+
+@app.delete("/api/groups/{gid}", include_in_schema=False)
+def delete_group(gid: int, db: Session = Depends(get_db), web_user=Depends(get_web_user)):
+    if not web_user:
+        raise HTTPException(401, "Not authenticated")
+    members = services.get_group_members(gid, db)
+    if not any(m["user_id"] == web_user.id for m in members):
+        raise HTTPException(403, "Not a member of this group")
+    ok = services.delete_group(gid, db)
+    if not ok:
+        raise HTTPException(404, "Group not found")
+    return {"ok": True}
+
+
+@app.delete("/api/groups/{gid}/expenses/{eid}", include_in_schema=False)
+def delete_group_expense(gid: int, eid: int, db: Session = Depends(get_db), web_user=Depends(get_web_user)):
+    if not web_user:
+        raise HTTPException(401, "Not authenticated")
+    members = services.get_group_members(gid, db)
+    if not any(m["user_id"] == web_user.id for m in members):
+        raise HTTPException(403, "Not a member of this group")
+    ok = services.delete_group_expense(eid, gid, db)
+    if not ok:
+        raise HTTPException(404, "Expense not found")
+    return {"ok": True}
 
 
 @app.post("/api/groups/{gid}/settle", include_in_schema=False)

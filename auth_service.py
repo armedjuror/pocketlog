@@ -66,6 +66,28 @@ def get_or_create_guest_user(
     return guest
 
 
+def merge_username_guest_to_numeric(
+    platform: str, numeric_id: str, username: str, db: Session
+) -> Optional[User]:
+    """
+    If a @username-based guest identity exists, re-anchor it to the real numeric
+    chat_id and update all GroupMember records so their shares remain intact.
+    Returns the guest User if found and updated, None otherwise.
+    """
+    from models import GroupMember
+    at_id = f"@{username}"
+    identity = db.query(BotIdentity).filter_by(platform=platform, chat_id=at_id).first()
+    if not identity or not identity.user or not identity.user.is_guest:
+        return None
+
+    identity.chat_id = numeric_id
+    db.query(GroupMember).filter_by(platform_user_id=at_id).update(
+        {"platform_user_id": numeric_id}, synchronize_session=False
+    )
+    db.commit()
+    return identity.user
+
+
 def merge_guest_user(user: User, name: str, email: str, currency: str, db: Session) -> User:
     """
     Upgrade a guest User to a full account after they complete signup with an email.

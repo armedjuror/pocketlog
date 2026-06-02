@@ -96,9 +96,32 @@ class AuthFlowMixin:
         user = auth_service.get_user_by_bot(platform, chat_id, db)
 
         if user is None:
+            # Check if a guest identity was created via @username mention (before real chat_id known)
+            if msg.username:
+                from models import BotIdentity as _BI
+                username_identity = db.query(_BI).filter_by(
+                    platform=platform, chat_id=f"@{msg.username}"
+                ).first()
+                if username_identity and username_identity.user and username_identity.user.is_guest:
+                    # Re-anchor the BotIdentity to the real numeric chat_id
+                    username_identity.chat_id = chat_id
+                    db.commit()
+                    # Fall through to the signup flow — _handle_currency will merge the guest
+
             await self.send_message(
                 chat_id,
                 "Welcome to PocketLog!\n\nLet's set up your account. What's your name?",
+            )
+            auth_service.set_bot_state(platform, chat_id, "awaiting_name", db)
+            return None
+
+        # Guest user — hasn't completed registration yet; send them through signup
+        if user.is_guest:
+            await self.send_message(
+                chat_id,
+                f"Hi {user.name}! 👋 You've been added to a group on PocketLog.\n\n"
+                "Let's finish setting up your account so you can track your share of expenses.\n\n"
+                "What name should we use for you?",
             )
             auth_service.set_bot_state(platform, chat_id, "awaiting_name", db)
             return None
@@ -164,11 +187,12 @@ class AuthFlowMixin:
 
         existing_user = auth_service.get_user_by_email(email, db)
 
-        if existing_user:
+        if existing_user and not existing_user.is_guest:
             # ── Email collision — verify ownership via existing bot ────────
             return await self._initiate_merge(
                 existing_user, email, platform, chat_id, state_row, db
             )
+        # If existing_user is a guest, fall through to send OTP — will merge at currency step
 
         # Fresh signup — send email verification OTP
         import random
@@ -263,15 +287,25 @@ class AuthFlowMixin:
         email    = state_row.temp_email
 
         # Check if this chat_id is already a guest identity — if so, merge instead of create
-        existing_identity = db.query(
-            __import__("models", fromlist=["BotIdentity"]).BotIdentity
-        ).filter_by(platform=platform, chat_id=chat_id).first()
+        BotIdentity = __import__("models", fromlist=["BotIdentity"]).BotIdentity
+        existing_identity = db.query(BotIdentity).filter_by(platform=platform, chat_id=chat_id).first()
 
         if existing_identity and existing_identity.user and existing_identity.user.is_guest:
+            # Telegram-created guest — merge in place (BotIdentity already exists)
             user = auth_service.merge_guest_user(existing_identity.user, name, email, code, db)
         else:
-            user = auth_service.create_user(name=name, email=email, primary_bot=platform, db=db, currency=code)
-            auth_service.link_bot_identity(user.id, platform, chat_id, db)
+            # Check for web-created guest matched by email
+            from models import User as _User
+            guest_by_email = (
+                db.query(_User).filter_by(email=email.lower().strip(), is_guest=True).first()
+                if email else None
+            )
+            if guest_by_email:
+                user = auth_service.merge_guest_user(guest_by_email, name, email, code, db)
+                auth_service.link_bot_identity(user.id, platform, chat_id, db)
+            else:
+                user = auth_service.create_user(name=name, email=email, primary_bot=platform, db=db, currency=code)
+                auth_service.link_bot_identity(user.id, platform, chat_id, db)
         auth_service.create_session(user.id, db)
         from services import create_account
         from models import AccountType

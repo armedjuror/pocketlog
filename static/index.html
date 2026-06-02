@@ -167,6 +167,7 @@
   /* ── Main ── */
   .main {
     margin-left: var(--sidebar-w);
+    margin-right: 0;
     flex: 1;
     padding: 0;
     max-width: calc(100vw - var(--sidebar-w));
@@ -197,7 +198,7 @@
     font-weight: 800;
     letter-spacing: -.3px;
   }
-  .topbar-right { display: flex; gap: 8px; align-items: center; }
+  .topbar-right { display: flex; gap: 8px; align-items: center; flex-wrap: wrap;}
 
   .hamburger {
     display: none;
@@ -712,6 +713,20 @@
   .empty a { color: var(--accent); text-decoration: none; }
   .empty a:hover { text-decoration: underline; }
 
+  /* ── Top loader bar ── */
+  #loader {
+    position: fixed;
+    top: 0; left: 0;
+    height: 2px;
+    width: 0%;
+    background: linear-gradient(90deg, var(--accent), var(--accent2));
+    z-index: 9999;
+    transition: width .2s ease, opacity .3s ease;
+    opacity: 0;
+    pointer-events: none;
+  }
+  #loader.active { opacity: 1; }
+
   /* ── Toast ── */
   #toast {
     position: fixed;
@@ -867,30 +882,169 @@
   .share-pill.settled { background: var(--green-dim); color: var(--green); }
   .share-pill.unsettled { background: var(--red-dim); color: var(--red); }
 
+  /* ── Sidebar on right (mobile only) ── */
+
+  /* ── Bottom nav ── */
+  .bottom-nav {
+    display: none;
+    position: fixed;
+    bottom: 0; left: 0; right: 0;
+    background: var(--surface);
+    border-top: 1px solid var(--border);
+    z-index: 90;
+    padding-bottom: env(safe-area-inset-bottom);
+  }
+  .bnav-item {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 4px;
+    padding: 10px 4px;
+    cursor: pointer;
+    color: var(--muted);
+    font-size: 10px;
+    font-weight: 500;
+    transition: color var(--transition);
+    -webkit-tap-highlight-color: transparent;
+  }
+  .bnav-item i, .bnav-item svg { width: 20px; height: 20px; flex-shrink: 0; display: flex; }
+  .bnav-item.active { color: var(--accent2); }
+
   /* ── Responsive ── */
   @media (max-width: 1100px) {
     .summary-grid { grid-template-columns: repeat(2, 1fr); }
   }
-  @media (max-width: 900px) {
+  @media (max-width: 1000px) {
     .grid2, .grid3 { grid-template-columns: 1fr; }
-    .profile-grid { grid-template-columns: 1fr; max-width: 480px; }
-    .groups-layout { flex-direction: column; height: auto; }
-    .groups-sidebar { width: 100%; }
+    .profile-grid { grid-template-columns: 1fr; max-width: 600px; }
+    .groups-layout { flex-direction: column; height: auto; gap: 0; }
+    .groups-sidebar { width: 100%; max-height: none; overflow-y: unset; }
+    /* On mobile: when group is selected hide the list, show back button */
+    .groups-layout.group-selected .groups-sidebar { display: none; }
+    .groups-layout.group-selected .groups-placeholder { display: none; }
+    .groups-detail { max-height: none; overflow-y: unset; }
+    .group-back-btn { display: flex !important; }
+    /* Group expenses table → cards */
+    #page-groups .table-wrap { overflow-x: unset; }
+    #page-groups thead { display: none; }
+    #page-groups tbody { display: block; }
+    #groupExpensesBody tr {
+      display: grid;
+      grid-template-columns: 1fr auto;
+      grid-template-rows: auto auto auto;
+      gap: 3px 8px;
+      background: var(--surface2);
+      border-radius: var(--radius-sm);
+      margin-bottom: 8px;
+      padding: 11px 14px;
+    }
+    #groupExpensesBody td { display: block; padding: 0; border: none; }
+    /* Description */
+    #groupExpensesBody td:nth-child(2) { grid-column: 1; grid-row: 1; font-weight: 600; font-size: 13.5px; }
+    /* Paid by */
+    #groupExpensesBody td:nth-child(3) { grid-column: 1; grid-row: 2; font-size: 11.5px; color: var(--text2); }
+    /* Date */
+    #groupExpensesBody td:nth-child(1) { grid-column: 1; grid-row: 3; font-size: 11px; color: var(--muted); }
+    /* Total */
+    #groupExpensesBody td:nth-child(4) { grid-column: 2; grid-row: 1; text-align: right; font-weight: 600; }
+    /* Your share */
+    #groupExpensesBody td:nth-child(5) { grid-column: 2; grid-row: 2; text-align: right; font-size: 12px; color: var(--text2); }
+    /* Status */
+    #groupExpensesBody td:nth-child(6) { grid-column: 2; grid-row: 3; text-align: right; }
+    /* Delete btn */
+    #groupExpensesBody td:nth-child(7) { grid-column: 2; grid-row: 1; display: flex; justify-content: flex-end; align-items: flex-start; }
   }
-  @media (max-width: 700px) {
+  @media (max-width: 1000px) {
     :root { --sidebar-w: 0px; }
-    .sidebar { transform: translateX(-230px); width: 230px; }
+    .sidebar { left: auto; right: 0; border-left: 1px solid var(--border); border-right: none; transform: translateX(230px); width: 230px; }
     .sidebar.open { transform: translateX(0); }
-    .main { margin-left: 0; max-width: 100vw; }
+    .main { margin-left: 0; margin-right: 0; max-width: 100vw; }
     .hamburger { display: flex; }
-    .content { padding: 16px; }
-    .topbar { padding: 12px 16px; }
+    .content { padding: 16px 14px; padding-bottom: 80px; }
+    .topbar { padding: 10px 14px; }
+    .topbar-right { gap: 6px; }
     .summary-grid { grid-template-columns: 1fr 1fr; }
+    .summary-card { padding: 14px 16px; }
     .summary-card-value { font-size: 18px; }
     .topbar-title { font-size: 16px; }
+    .bottom-nav { display: flex; }
+    /* Hide hamburger since we have bottom nav */
+    .hamburger { display: none; }
+    /* Account cards: single column */
+    .accounts-grid { grid-template-columns: 1fr; }
+    /* Groups */
+    .groups-layout { gap: 12px; }
+    /* Lending */
+    .lending-item { flex-direction: column; gap: 10px; }
+    .lending-right { flex-direction: row; align-items: center; margin-left: 0; }
+    /* Toast above bottom nav */
+    #toast { bottom: 72px; }
+    /* Summary grid label truncation */
+    .summary-card-label { font-size: 10.5px; }
   }
-  @media (max-width: 480px) {
+  @media (max-width: 600px) {
     .summary-grid { grid-template-columns: 1fr; }
+    .topbar-right .btn span, .topbar-right .btn i + * { display: none; }
+    .month-nav span { min-width: 80px; font-size: 12px; }
+  }
+
+  /* ── Transaction table → cards on mobile ── */
+  @media (max-width: 1000px) {
+    #page-transactions .table-wrap { overflow-x: unset; }
+    #page-transactions table { width: 100%; border-collapse: collapse; }
+    #page-transactions thead { display: none; }
+    #page-transactions tbody { display: block; }
+    #txnTableBody tr {
+      display: grid;
+      grid-template-columns: 1fr auto;
+      grid-template-rows: auto auto;
+      gap: 4px 8px;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-sm);
+      margin-bottom: 8px;
+      padding: 12px 14px;
+    }
+    #txnTableBody tr:hover { background: var(--surface2); }
+    #txnTableBody td { display: block; padding: 0; border: none; }
+    /* Date */
+    #txnTableBody td:nth-child(1) { grid-column: 1; grid-row: 2; font-size: 11px; color: var(--text2); }
+    /* Description */
+    #txnTableBody td:nth-child(2) { grid-column: 1; grid-row: 1; font-size: 13.5px; font-weight: 600; }
+    /* Category — hidden */
+    #txnTableBody td:nth-child(3) { display: none; }
+    /* Account — hidden */
+    #txnTableBody td:nth-child(4) { display: none; }
+    /* Amount */
+    #txnTableBody td:nth-child(5) { grid-column: 2; grid-row: 1; text-align: right; font-size: 14px; }
+    /* Actions */
+    #txnTableBody td:nth-child(6) { grid-column: 2; grid-row: 2; display: flex; justify-content: flex-end; }
+    .pagination { flex-direction: column; gap: 8px; text-align: center; }
+    /* Transaction filters row */
+    .txn-filters-row { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 12px; }
+    .txn-filters-row select { flex: 1; min-width: 130px; }
+  }
+
+  /* ── Modals as bottom sheet on mobile ── */
+  @media (max-width: 1000px) {
+    .modal-overlay {
+      align-items: flex-end;
+      padding: 0;
+    }
+    .modal {
+      max-width: 100%;
+      width: 100%;
+      border-radius: var(--radius-lg) var(--radius-lg) 0 0;
+      max-height: 88vh;
+      animation: sheetIn .25s cubic-bezier(.4,0,.2,1);
+      padding-bottom: env(safe-area-inset-bottom);
+    }
+    @keyframes sheetIn {
+      from { transform: translateY(100%); }
+      to   { transform: translateY(0); }
+    }
   }
 </style>
 </head>
@@ -957,23 +1111,15 @@
         <h1 class="topbar-title" id="pageTitle">Dashboard</h1>
       </div>
       <div class="topbar-right">
-        <div id="txnFilters">
-          <select id="filterAccount" onchange="loadTransactions()" class="topbar-select">
-            <option value="">All Accounts</option>
-          </select>
-          <select id="filterCategory" onchange="loadTransactions()" class="topbar-select">
-            <option value="">All Categories</option>
-          </select>
-        </div>
-        <div class="month-nav">
+        <div class="month-nav" id="monthNav">
           <button onclick="prevMonth()"><i data-lucide="chevron-left"></i></button>
           <span id="monthLabel">—</span>
           <button onclick="nextMonth()"><i data-lucide="chevron-right"></i></button>
         </div>
-        <button class="btn btn-ghost" onclick="exportCSV()">
+        <button class="btn btn-ghost" id="exportBtn" onclick="exportCSV()">
           <i data-lucide="download"></i> Export
         </button>
-        <button class="btn btn-primary" onclick="openAddTxn()">
+        <button class="btn btn-primary" id="addTxnBtn" onclick="openAddTxn()">
           <i data-lucide="plus"></i> Add
         </button>
       </div>
@@ -1022,6 +1168,14 @@
 
       <!-- TRANSACTIONS -->
       <div class="page" id="page-transactions">
+        <div class="txn-filters-row" id="txnFilters" style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px">
+          <select id="filterAccount" onchange="loadTransactions()" class="topbar-select" style="flex:1;min-width:130px">
+            <option value="">All Accounts</option>
+          </select>
+          <select id="filterCategory" onchange="loadTransactions()" class="topbar-select" style="flex:1;min-width:130px">
+            <option value="">All Categories</option>
+          </select>
+        </div>
         <div class="panel">
           <div class="table-wrap">
             <table>
@@ -1099,11 +1253,16 @@
         <div class="groups-layout">
           <!-- Left: group list -->
           <div class="groups-sidebar panel" id="groupListPanel">
-            <div class="panel-head"><span class="panel-title">My Groups</span></div>
+            <div class="panel-head">
+              <span class="panel-title">My Groups</span>
+              <button class="btn btn-primary btn-sm" onclick="openCreateGroup()">
+                <i data-lucide="plus"></i> New
+              </button>
+            </div>
             <div id="groupList" class="group-list">
               <div class="empty" id="groupListEmpty" style="display:none">
                 <div class="empty-icon">👥</div>
-                <p>No groups yet.<br>Add the bot to a Telegram group to get started.</p>
+                <p>No groups yet.<br>Create one or add the bot to a Telegram group.</p>
               </div>
             </div>
           </div>
@@ -1111,9 +1270,21 @@
           <div class="groups-detail" id="groupDetail" style="display:none">
             <div class="panel" style="margin-bottom:16px">
               <div class="panel-head">
-                <span class="panel-title" id="groupDetailName">—</span>
+                <div style="display:flex;align-items:center;gap:8px;min-width:0">
+                  <button class="btn btn-ghost btn-sm group-back-btn" style="display:none;flex-shrink:0" onclick="groupGoBack()">
+                    <i data-lucide="arrow-left"></i>
+                  </button>
+                  <span class="panel-title" id="groupDetailName" style="min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">—</span>
+                </div>
+                <div style="display:flex;gap:6px;flex-shrink:0">
+                  <button class="btn btn-ghost btn-sm" onclick="openAddMember()">
+                    <i data-lucide="user-plus"></i> Add Member
+                  </button>
+                  <button class="btn btn-ghost btn-sm" style="color:var(--red)" onclick="openDeleteGroup()" id="deleteGroupBtn">
+                    <i data-lucide="trash-2"></i>
+                  </button>
+                </div>
               </div>
-              <!-- Members strip -->
               <div class="panel-body">
                 <div class="group-members-strip" id="groupMembersStrip"></div>
               </div>
@@ -1122,21 +1293,26 @@
             <div class="panel" style="margin-bottom:16px">
               <div class="panel-head">
                 <span class="panel-title">Balances</span>
-                <div style="display:flex;align-items:center;gap:10px">
+                <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
                   <label style="display:flex;align-items:center;gap:6px;font-size:12.5px;color:var(--text2);cursor:pointer">
                     <input type="checkbox" id="simplifyToggle" onchange="reloadBalances()" style="accent-color:var(--accent)">
-                    Simplify debts
+                    Simplify
                   </label>
-                  <button class="btn btn-ghost btn-sm" onclick="openCloseGroupDialog()" id="closeGroupBtn" style="border-color:var(--red);color:var(--red);font-size:12px;padding:4px 10px">
+                  <button class="btn btn-ghost btn-sm" onclick="openCloseGroupDialog()" id="closeGroupBtn" style="border-color:var(--red);color:var(--red)">
                     Close group
                   </button>
                 </div>
               </div>
               <div class="panel-body" id="groupBalances"></div>
             </div>
-            <!-- Expenses table -->
+            <!-- Expenses -->
             <div class="panel">
-              <div class="panel-head"><span class="panel-title">Expenses</span></div>
+              <div class="panel-head">
+                <span class="panel-title">Expenses</span>
+                <button class="btn btn-primary btn-sm" onclick="openAddSplit()" id="addSplitBtn">
+                  <i data-lucide="plus"></i> Add Split
+                </button>
+              </div>
               <div class="table-wrap">
                 <table>
                   <thead><tr>
@@ -1146,12 +1322,13 @@
                     <th>Total</th>
                     <th>Your share</th>
                     <th>Status</th>
+                    <th></th>
                   </tr></thead>
                   <tbody id="groupExpensesBody"></tbody>
                 </table>
                 <div id="groupExpensesEmpty" class="empty" style="display:none">
                   <div class="empty-icon">🧾</div>
-                  <p>No expenses yet — use the bot to split in your group</p>
+                  <p>No expenses yet. Add a split above or use the Telegram bot.</p>
                 </div>
               </div>
             </div>
@@ -1226,10 +1403,137 @@
   </div><!-- /main -->
 </div><!-- /shell -->
 
+<div id="loader"></div>
 <div id="toast"></div>
 
+<!-- DELETE GROUP MODAL -->
+<div class="modal-overlay" id="deleteGroupModal">
+  <div class="modal">
+    <div class="modal-head">
+      <h2 style="color:var(--red)">Delete Group</h2>
+      <button class="close-btn" onclick="closeModal('deleteGroupModal')">&#x2715;</button>
+    </div>
+    <div class="modal-body">
+      <p style="color:var(--text2);font-size:13.5px;line-height:1.65;margin-bottom:10px">
+        This will permanently delete <strong id="deleteGroupName" style="color:var(--text)"></strong> and all associated data:
+      </p>
+      <ul style="color:var(--text2);font-size:13px;line-height:2;padding-left:18px;margin-bottom:16px">
+        <li>All split expenses and shares</li>
+        <li>All related transactions logged to members</li>
+        <li>All group members</li>
+      </ul>
+      <p style="color:var(--red);font-size:13px;font-weight:600">This cannot be undone.</p>
+      <div class="form-actions">
+        <button class="btn btn-ghost" onclick="closeModal('deleteGroupModal')">Cancel</button>
+        <button class="btn btn-danger" onclick="confirmDeleteGroup()">Delete Group</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- CREATE GROUP MODAL -->
+<div class="modal-overlay" id="createGroupModal">
+  <div class="modal">
+    <div class="modal-head">
+      <h2>New Group</h2>
+      <button class="close-btn" onclick="closeModal('createGroupModal')">&#x2715;</button>
+    </div>
+    <div class="modal-body">
+      <div class="form-row">
+        <label>Group Name</label>
+        <input type="text" id="newGroupName" placeholder="e.g. Goa Trip">
+      </div>
+      <div class="form-actions">
+        <button class="btn btn-ghost" onclick="closeModal('createGroupModal')">Cancel</button>
+        <button class="btn btn-primary" onclick="saveNewGroup()">Create</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ADD MEMBER MODAL -->
+<div class="modal-overlay" id="addMemberModal">
+  <div class="modal">
+    <div class="modal-head">
+      <h2>Add Member</h2>
+      <button class="close-btn" onclick="closeModal('addMemberModal')">&#x2715;</button>
+    </div>
+    <div class="modal-body">
+      <div class="form-row">
+        <label>Name</label>
+        <input type="text" id="newMemberName" placeholder="e.g. Rahul">
+      </div>
+      <div class="form-row">
+        <label>Email <span style="color:var(--muted);font-weight:400;text-transform:none;letter-spacing:0">(optional — invite &amp; link account)</span></label>
+        <input type="email" id="newMemberEmail" placeholder="rahul@example.com" oninput="lookupMemberEmail()">
+        <div id="memberEmailHint" style="font-size:12px;margin-top:5px;display:none"></div>
+      </div>
+      <div class="form-actions">
+        <button class="btn btn-ghost" onclick="closeModal('addMemberModal')">Cancel</button>
+        <button class="btn btn-primary" onclick="saveNewMember()">Add &amp; Invite</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ADD SPLIT MODAL -->
+<div class="modal-overlay" id="addSplitModal">
+  <div class="modal">
+    <div class="modal-head">
+      <h2>Add Split</h2>
+      <button class="close-btn" onclick="closeModal('addSplitModal')">&#x2715;</button>
+    </div>
+    <div class="modal-body">
+      <div class="form-row">
+        <label>Description</label>
+        <input type="text" id="splitDesc" placeholder="e.g. Dinner">
+      </div>
+      <div class="form-row">
+        <label>Amount (&#8377;)</label>
+        <input type="number" id="splitAmount" placeholder="0.00" step="0.01">
+      </div>
+      <div class="form-row">
+        <label>Date</label>
+        <input type="date" id="splitDate">
+      </div>
+      <div class="form-row">
+        <label>Paid by</label>
+        <select id="splitPaidBy"></select>
+      </div>
+      <div class="form-row">
+        <label>Split between</label>
+        <div id="splitMembersCheck" style="display:flex;flex-direction:column;gap:6px;margin-top:4px"></div>
+      </div>
+      <div class="form-actions">
+        <button class="btn btn-ghost" onclick="closeModal('addSplitModal')">Cancel</button>
+        <button class="btn btn-primary" onclick="saveNewSplit()">Add Split</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Bottom nav (mobile only) -->
+<nav class="bottom-nav" id="bottomNav">
+  <div class="bnav-item active" data-page="dashboard" onclick="showPage('dashboard')">
+    <i data-lucide="layout-dashboard"></i>
+    <span>Dashboard</span>
+  </div>
+  <div class="bnav-item" data-page="transactions" onclick="showPage('transactions')">
+    <i data-lucide="arrow-up-down"></i>
+    <span>Transactions</span>
+  </div>
+  <div class="bnav-item" data-page="accounts" onclick="showPage('accounts')">
+    <i data-lucide="credit-card"></i>
+    <span>Accounts</span>
+  </div>
+  <div class="bnav-item" data-page="__more__" onclick="toggleSidebar()">
+    <i data-lucide="menu"></i>
+    <span>More</span>
+  </div>
+</nav>
+
 <!-- DELETE ACCOUNT MODAL -->
-<div class="modal-overlay" id="deleteAccountModal" style="display:none" onclick="if(event.target===this)closeDeleteAccount()">
+<div class="modal-overlay" id="deleteAccountModal" onclick="if(event.target===this)closeDeleteAccount()">
   <div class="modal">
     <div class="modal-head">
       <h2 style="color:var(--red)">Delete Account</h2>
@@ -1534,7 +1838,14 @@ function showPage(name, pushState = true) {
     accounts: 'Accounts', budgets: 'Budgets', lending: 'Lending',
     groups: 'Groups', analytics: 'Analytics', profile: 'Profile' };
   document.getElementById('pageTitle').textContent = titles[name] || name;
-  document.getElementById('txnFilters').style.display = name === 'transactions' ? 'flex' : 'none';
+  const showTopbarActions = name === 'dashboard' || name === 'transactions';
+  document.getElementById('monthNav').style.display   = showTopbarActions ? '' : 'none';
+  document.getElementById('exportBtn').style.display  = showTopbarActions ? '' : 'none';
+  document.getElementById('addTxnBtn').style.display  = showTopbarActions ? '' : 'none';
+  // Update bottom nav active state
+  document.querySelectorAll('.bnav-item').forEach(el => el.classList.remove('active'));
+  const bnav = document.querySelector(`.bnav-item[data-page="${name}"]`);
+  if (bnav) bnav.classList.add('active');
   if (pushState) location.hash = name === 'dashboard' ? '' : name;
   closeSidebar();
   if (name === 'dashboard') loadDashboard();
@@ -1578,12 +1889,39 @@ function refreshCurrentPage() {
 }
 
 // ── API helpers ────────────────────────────────────────────────────────────
+// ── Loader ─────────────────────────────────────────────────────────────────
+let _loadCount = 0;
+let _loaderTimer = null;
+function _loaderShow() {
+  _loadCount++;
+  const el = document.getElementById('loader');
+  el.classList.add('active');
+  el.style.width = '30%';
+  clearTimeout(_loaderTimer);
+}
+function _loaderDone() {
+  _loadCount = Math.max(0, _loadCount - 1);
+  if (_loadCount > 0) return;
+  const el = document.getElementById('loader');
+  el.style.width = '100%';
+  _loaderTimer = setTimeout(() => {
+    el.classList.remove('active');
+    el.style.width = '0%';
+  }, 300);
+}
+
+// ── API helper ─────────────────────────────────────────────────────────────
 async function api(url, method='GET', body=null) {
-  const opts = { method, headers: { 'Content-Type': 'application/json' } };
-  if (body) opts.body = JSON.stringify(body);
-  const r = await fetch(url, opts);
-  if (!r.ok) throw new Error(await r.text());
-  return r.json();
+  _loaderShow();
+  try {
+    const opts = { method, headers: { 'Content-Type': 'application/json' } };
+    if (body) opts.body = JSON.stringify(body);
+    const r = await fetch(url, opts);
+    if (!r.ok) throw new Error(await r.text());
+    return r.json();
+  } finally {
+    _loaderDone();
+  }
 }
 
 function toast(msg, type='success') {
@@ -2462,15 +2800,19 @@ async function selectGroup(gid) {
   const group = groupsData.find(g => g.id === gid);
   document.getElementById('groupDetail').style.display = '';
   document.getElementById('groupsPlaceholder').style.display = 'none';
+  document.querySelector('.groups-layout').classList.add('group-selected');
 
   const closedBadge = group && group.is_closed
     ? ' <span style="font-size:11px;padding:2px 8px;border-radius:10px;background:var(--surface3);color:var(--muted)">Closed</span>'
     : '';
   document.getElementById('groupDetailName').innerHTML = gEsc(group ? group.name : 'Group') + closedBadge;
 
-  // Show/hide close button based on closed state
+  // Show/hide close button and add-split button based on closed state
+  const isClosed = group && group.is_closed;
   const closeBtn = document.getElementById('closeGroupBtn');
-  if (closeBtn) closeBtn.style.display = (group && group.is_closed) ? 'none' : '';
+  if (closeBtn) closeBtn.style.display = isClosed ? 'none' : '';
+  const addSplitBtn = document.getElementById('addSplitBtn');
+  if (addSplitBtn) addSplitBtn.style.display = isClosed ? 'none' : '';
 
   try {
     const simplified = document.getElementById('simplifyToggle').checked;
@@ -2520,16 +2862,177 @@ async function doCloseGroup() {
   }
 }
 
+// ── Delete group ───────────────────────────────────────────────────────────
+function openDeleteGroup() {
+  if (!selectedGroupId) return;
+  const group = groupsData.find(g => g.id === selectedGroupId);
+  document.getElementById('deleteGroupName').textContent = group ? group.name : 'this group';
+  openModal('deleteGroupModal');
+}
+
+async function confirmDeleteGroup() {
+  if (!selectedGroupId) return;
+  try {
+    await api(`/api/groups/${selectedGroupId}`, 'DELETE');
+    closeModal('deleteGroupModal');
+    toast('Group deleted');
+    selectedGroupId = null;
+    groupMembersData = [];
+    document.getElementById('groupDetail').style.display = 'none';
+    document.getElementById('groupsPlaceholder').style.display = '';
+    document.getElementById('groups-layout')?.classList.remove('group-selected');
+    document.querySelector('.groups-layout')?.classList.remove('group-selected');
+    await loadGroups();
+  } catch (e) { toast('Failed: ' + e.message, 'error'); }
+}
+
+// ── Mobile back button ─────────────────────────────────────────────────────
+function groupGoBack() {
+  selectedGroupId = null;
+  document.getElementById('groupDetail').style.display = 'none';
+  document.getElementById('groupsPlaceholder').style.display = '';
+  document.querySelector('.groups-layout').classList.remove('group-selected');
+  document.querySelectorAll('.group-item').forEach(el => el.classList.remove('active'));
+}
+
+// ── Group create ───────────────────────────────────────────────────────────
+function openCreateGroup() {
+  document.getElementById('newGroupName').value = '';
+  openModal('createGroupModal');
+}
+
+async function saveNewGroup() {
+  const name = document.getElementById('newGroupName').value.trim();
+  if (!name) { toast('Name required', 'error'); return; }
+  try {
+    const g = await api('/api/groups', 'POST', { name });
+    closeModal('createGroupModal');
+    toast('Group created');
+    await loadGroups();
+    selectGroup(g.id);
+  } catch (e) { toast('Failed: ' + e.message, 'error'); }
+}
+
+// ── Add member ─────────────────────────────────────────────────────────────
+function openAddMember() {
+  if (!selectedGroupId) return;
+  document.getElementById('newMemberName').value = '';
+  document.getElementById('newMemberEmail').value = '';
+  document.getElementById('memberEmailHint').style.display = 'none';
+  openModal('addMemberModal');
+}
+
+let _emailLookupTimer = null;
+function lookupMemberEmail() {
+  clearTimeout(_emailLookupTimer);
+  const hint = document.getElementById('memberEmailHint');
+  const email = document.getElementById('newMemberEmail').value.trim();
+  if (!email || !email.includes('@')) { hint.style.display = 'none'; return; }
+  _emailLookupTimer = setTimeout(async () => {
+    try {
+      const res = await api(`/api/lookup-user?email=${encodeURIComponent(email)}`);
+      if (res && res.name) {
+        hint.style.display = '';
+        hint.style.color = 'var(--green)';
+        hint.textContent = `Registered user found: ${res.name}`;
+        if (!document.getElementById('newMemberName').value.trim()) {
+          document.getElementById('newMemberName').value = res.name;
+        }
+      } else {
+        hint.style.display = '';
+        hint.style.color = 'var(--text2)';
+        hint.textContent = 'No PocketLog account found — will be added as a guest and invited.';
+      }
+    } catch { hint.style.display = 'none'; }
+  }, 500);
+}
+
+async function saveNewMember() {
+  const name  = document.getElementById('newMemberName').value.trim();
+  const email = document.getElementById('newMemberEmail').value.trim();
+  if (!name) { toast('Name required', 'error'); return; }
+  try {
+    const res = await api(`/api/groups/${selectedGroupId}/members`, 'POST', { display_name: name, email: email || null });
+    closeModal('addMemberModal');
+    toast(res.already_exists ? 'Member already in group' : email ? 'Member added & invite sent' : 'Member added');
+    await selectGroup(selectedGroupId);
+  } catch (e) { toast('Failed: ' + e.message, 'error'); }
+}
+
+async function deleteMember(mid, name) {
+  if (!confirm(`Remove ${name} from this group?\n\nThis is only allowed if they have no unsettled transactions.`)) return;
+  try {
+    await api(`/api/groups/${selectedGroupId}/members/${mid}`, 'DELETE');
+    toast('Member removed');
+    await selectGroup(selectedGroupId);
+  } catch (e) { toast(e.message, 'error'); }
+}
+
+// ── Add split ──────────────────────────────────────────────────────────────
+function openAddSplit() {
+  if (!selectedGroupId || !groupMembersData.length) return;
+  document.getElementById('splitDesc').value = '';
+  document.getElementById('splitAmount').value = '';
+  document.getElementById('splitDate').value = new Date().toISOString().slice(0, 10);
+  // Populate paid-by select
+  const paidBy = document.getElementById('splitPaidBy');
+  paidBy.innerHTML = groupMembersData.map(m =>
+    `<option value="${m.id}">${gEsc(m.display_name)}</option>`
+  ).join('');
+  // Populate member checkboxes (all checked by default)
+  const checks = document.getElementById('splitMembersCheck');
+  checks.innerHTML = groupMembersData.map(m =>
+    `<label style="display:flex;align-items:center;gap:8px;font-size:13.5px;cursor:pointer">
+      <input type="checkbox" value="${m.id}" checked style="accent-color:var(--accent)">
+      ${gEsc(m.display_name)}
+    </label>`
+  ).join('');
+  openModal('addSplitModal');
+}
+
+async function saveNewSplit() {
+  const desc   = document.getElementById('splitDesc').value.trim();
+  const amount = parseFloat(document.getElementById('splitAmount').value);
+  const date   = document.getElementById('splitDate').value;
+  const paidBy = parseInt(document.getElementById('splitPaidBy').value);
+  if (!desc || !amount || !date) { toast('Fill all fields', 'error'); return; }
+  const checked = [...document.querySelectorAll('#splitMembersCheck input:checked')];
+  if (!checked.length) { toast('Select at least one member', 'error'); return; }
+  const shares = checked.map(cb => ({ member_id: parseInt(cb.value), ratio: 1 }));
+  try {
+    await api(`/api/groups/${selectedGroupId}/expenses`, 'POST', {
+      description: desc, amount, date, paid_by_member_id: paidBy, shares
+    });
+    closeModal('addSplitModal');
+    toast('Split added');
+    await selectGroup(selectedGroupId);
+  } catch (e) { toast('Failed: ' + e.message, 'error'); }
+}
+
+// ── Delete expense ─────────────────────────────────────────────────────────
+async function deleteGroupExpense(gid, eid) {
+  if (!confirm('Delete this expense?')) return;
+  try {
+    await api(`/api/groups/${gid}/expenses/${eid}`, 'DELETE');
+    toast('Expense deleted');
+    await selectGroup(gid);
+  } catch (e) { toast('Failed: ' + e.message, 'error'); }
+}
+
 function renderGroupMembers(members) {
   const strip = document.getElementById('groupMembersStrip');
   strip.innerHTML = '';
   members.forEach(m => {
     const initials = m.display_name.split(' ').map(w => w[0]).join('').toUpperCase().slice(0, 2);
-    const isGuest = m.is_guest;
+    const isGuest = !m.user_id;
     const chip = document.createElement('div');
     chip.className = 'member-chip' + (isGuest ? ' guest' : '');
+    chip.style.cursor = 'default';
     chip.innerHTML = `<div class="member-avatar">${gEsc(initials)}</div>
-      ${gEsc(m.display_name)}${isGuest ? ' <span style="font-size:10px;opacity:.7">(guest)</span>' : ''}`;
+      ${gEsc(m.display_name)}${isGuest ? ' <span style="font-size:10px;opacity:.7">(guest)</span>' : ''}
+      <button onclick="deleteMember(${m.id},'${gEsc(m.display_name)}')" title="Remove member"
+        style="background:none;border:none;cursor:pointer;color:var(--muted);padding:0 0 0 4px;font-size:13px;line-height:1;display:flex;align-items:center"
+        onmouseover="this.style.color='var(--red)'" onmouseout="this.style.color='var(--muted)'">&#x2715;</button>`;
     strip.appendChild(chip);
   });
 }
@@ -2599,9 +3102,11 @@ function renderGroupExpenses(expenses, members) {
       <td>${gFmt(exp.amount)}</td>
       <td>${myShareAmt !== null ? gFmt(myShareAmt) : '—'}</td>
       <td>${statusHtml}</td>
+      <td><button class="btn btn-ghost btn-sm" style="color:var(--red)" onclick="deleteGroupExpense(${selectedGroupId},${exp.id})"><i data-lucide="trash-2"></i></button></td>
     `;
     tbody.appendChild(tr);
   });
+  lucide.createIcons();
 }
 
 function openSettleDialog(gid, fromMemberId, toMemberId, amount, fromName, toName) {

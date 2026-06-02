@@ -23,6 +23,7 @@ class InboundMessage:
     text:        Optional[str]   = None   # plain text or voice transcription
     source_ref:  Optional[str]   = None   # channel-native message id
     chat_id:     Optional[str]   = None   # channel-native user/chat id
+    username:    Optional[str]   = None   # platform username (e.g. Telegram @handle without @)
     media_url:   Optional[str]   = None   # image / invoice URL if any
     raw:         Optional[dict]  = None   # original payload for debugging
     user_id:     Optional[int]   = None   # set after authentication
@@ -82,16 +83,17 @@ class BasePlugin(ABC):
         from services import create_transaction
         return create_transaction(
             db,
-            amount       = parsed.amount,
-            description  = parsed.description,
-            date         = parsed.date,
-            account_id   = parsed.account_id,
-            type         = parsed.type,
-            category_id  = parsed.category_id,
-            note         = parsed.note,
-            source_plugin= self.name,
-            source_ref   = msg.source_ref,
-            user_id      = msg.user_id,
+            amount        = parsed.amount,
+            description   = parsed.description,
+            date          = parsed.date,
+            account_id    = parsed.account_id,
+            to_account_id = parsed.to_account_id,
+            type          = parsed.type,
+            category_id   = parsed.category_id,
+            note          = parsed.note,
+            source_plugin = self.name,
+            source_ref    = msg.source_ref,
+            user_id       = msg.user_id,
         )
 
     def budget_warning(self, parsed: "services.ParsedTransaction", db, user_id=None) -> str:  # noqa: F821
