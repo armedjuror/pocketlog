@@ -756,13 +756,13 @@ def export_csv(db: Session, user_id: Optional[int] = None) -> str:
 _whisper_model = None
 
 def transcribe_audio(file_path: str) -> str:
-    """Transcribe an audio file using openai-whisper (base model, lazy-loaded)."""
+    """Transcribe an audio file using faster-whisper (base model, lazy-loaded)."""
     global _whisper_model
-    import whisper
+    from faster_whisper import WhisperModel
     if _whisper_model is None:
-        _whisper_model = whisper.load_model("base")
-    result = _whisper_model.transcribe(file_path)
-    return result["text"].strip()
+        _whisper_model = WhisperModel("base", device="cpu", compute_type="int8")
+    segments, _ = _whisper_model.transcribe(file_path)
+    return "".join(segment.text for segment in segments).strip()
 
 
 def ocr_image(file_path: str) -> str:
