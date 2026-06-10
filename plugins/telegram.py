@@ -427,6 +427,121 @@ class TelegramPlugin(AuthFlowMixin, BasePlugin):
             await self.send_message(msg.chat_id, "Send me a text message, a voice note, or a photo of your receipt.")
             return
 
+        # ── Pending transaction takes priority over all other handlers ─────
+        # When the user is answering our "I need: account, category" prompt,
+        # skip all the maybe_* dispatch and resolve inline.
+        pending = _pending.get(msg.chat_id)
+        if pending:
+            import difflib
+            from services import get_categories, get_accounts
+
+            if pending.parsed.missing:
+                user_text = (msg.text or "").strip().lower()
+                resolved_any = False
+
+                def _fuzzy_match(name_lower: str, candidates: list[str]) -> Optional[str]:
+                    """Exact → substring → fuzzy."""
+                    if name_lower in candidates:
+                        return name_lower
+                    for c in candidates:
+                        if c in name_lower or name_lower in c:
+                            return c
+                    close = difflib.get_close_matches(name_lower, candidates, n=1, cutoff=0.6)
+                    return close[0] if close else None
+
+                if "category_id" in pending.parsed.missing:
+                    cats = get_categories(db)
+                    cat_names = [c["name"].lower() for c in cats]
+                    matched = _fuzzy_match(user_text, cat_names)
+                    if matched:
+                        for c in cats:
+                            if c["name"].lower() == matched:
+                                pending.parsed.category_id = c["id"]
+                                pending.parsed.missing = [f for f in pending.parsed.missing if f != "category_id"]
+                                resolved_any = True
+                                break
+
+                if "account_id" in pending.parsed.missing:
+                    accs = get_accounts(db, user_id=msg.user_id)
+                    acc_names = [a["name"].lower() for a in accs]
+                    matched = _fuzzy_match(user_text, acc_names)
+                    if matched:
+                        for a in accs:
+                            if a["name"].lower() == matched:
+                                pending.parsed.account_id = a["id"]
+                                pending.parsed.missing = [f for f in pending.parsed.missing if f != "account_id"]
+                                resolved_any = True
+                                break
+
+                if resolved_any and not pending.parsed.missing:
+                    _pending.pop(msg.chat_id, None)
+                    try:
+                        self.save(pending.parsed, db, msg)
+                    except Exception as exc:
+                        log.exception("Save failed after local resolution")
+                        await self.send_message(msg.chat_id, f"Couldn't save: {exc}")
+                        return
+                    warning = self.budget_warning(pending.parsed, db, user_id=msg.user_id)
+                    await self.send_message(msg.chat_id, (pending.parsed.reply or "Logged!") + warning)
+                    return
+                elif resolved_any:
+                    await self.send_message(msg.chat_id, self.missing_prompt(pending.parsed, db=db, user_id=msg.user_id))
+                    return
+
+            # Local resolution didn't fully resolve — ask AI with explicit context
+            missing_labels = ", ".join(pending.parsed.missing) if pending.parsed.missing else "unknown"
+            parse_text = (
+                f"{pending.original_text}\n"
+                f"[Pending transaction — still need: {missing_labels}. "
+                f"User's reply: {msg.text}]"
+            )
+            try:
+                parse_msg = InboundMessage(
+                    text=parse_text,
+                    source_ref=msg.source_ref,
+                    chat_id=msg.chat_id,
+                    media_url=msg.media_url,
+                    raw=msg.raw,
+                    user_id=msg.user_id,
+                )
+                parsed = self.parse(parse_msg, db)
+            except Exception as exc:
+                log.exception("AI parse failed for pending context")
+                await self.send_message(msg.chat_id, f"Couldn't parse that: {exc}")
+                return
+
+            # If AI still can't resolve it, re-ask rather than dropping context
+            if parsed.action == "chat" or (parsed.chat and parsed.action not in (
+                "transaction", "list_transactions", "list_accounts",
+                "list_categories", "list_budgets", "list_lending", "report"
+            )):
+                await self.send_message(msg.chat_id, self.missing_prompt(pending.parsed, db=db, user_id=msg.user_id))
+                return
+
+            if parsed.missing:
+                _pending[msg.chat_id] = _PendingTx(
+                    original_text=pending.original_text,
+                    parsed=parsed,
+                )
+                await self.send_message(msg.chat_id, self.missing_prompt(parsed, db=db, user_id=msg.user_id))
+                return
+
+            if parsed.amount is None and not parsed.missing:
+                await self.send_message(msg.chat_id, self.missing_prompt(pending.parsed, db=db, user_id=msg.user_id))
+                return
+
+            _pending.pop(msg.chat_id, None)
+            try:
+                self.save(parsed, db, msg)
+            except Exception as exc:
+                log.exception("Save failed after AI pending resolution")
+                await self.send_message(msg.chat_id, f"Couldn't save: {exc}")
+                return
+            warning = self.budget_warning(parsed, db, user_id=msg.user_id)
+            await self.send_message(msg.chat_id, (parsed.reply or "Logged!") + warning)
+            return
+
+        # ── No pending — run normal maybe_* handlers ─────────────────────
         if not msg.text.startswith("RECEIPT"):
             # ── Account management (delete all / create)? ────────────────────
             manage_reply = await self.maybe_manage_accounts(msg, db)
@@ -482,53 +597,8 @@ class TelegramPlugin(AuthFlowMixin, BasePlugin):
                 await self.send_message(msg.chat_id, report)
                 return
 
-        # ── Expense / income entry ────────────────────────────────────────
-        # If there's a pending transaction awaiting missing fields, combine contexts
-        pending = _pending.get(msg.chat_id)
+        # ── Fresh expense / income entry ──────────────────────────────────
         parse_text = msg.text or ""
-
-        # Try to resolve pending missing fields locally (no AI needed)
-        if pending and pending.parsed.missing:
-            from services import get_categories, get_accounts
-            user_text = (msg.text or "").strip().lower()
-            resolved_any = False
-
-            if "category_id" in pending.parsed.missing:
-                for c in get_categories(db):
-                    if c["name"].lower() == user_text or c["name"].lower() in user_text:
-                        pending.parsed.category_id = c["id"]
-                        pending.parsed.missing = [f for f in pending.parsed.missing if f != "category_id"]
-                        resolved_any = True
-                        break
-
-            if "account_id" in pending.parsed.missing:
-                for a in get_accounts(db, user_id=msg.user_id):
-                    if a["name"].lower() == user_text or a["name"].lower() in user_text:
-                        pending.parsed.account_id = a["id"]
-                        pending.parsed.missing = [f for f in pending.parsed.missing if f != "account_id"]
-                        resolved_any = True
-                        break
-
-            if resolved_any and not pending.parsed.missing:
-                _pending.pop(msg.chat_id, None)
-                try:
-                    self.save(pending.parsed, db, msg)
-                except Exception as exc:
-                    log.exception("Save failed after local resolution")
-                    await self.send_message(msg.chat_id, f"Couldn't save: {exc}")
-                    return
-                warning = self.budget_warning(pending.parsed, db, user_id=msg.user_id)
-                await self.send_message(msg.chat_id, (pending.parsed.reply or "Logged!") + warning)
-                return
-            elif resolved_any:
-                # Still missing some fields — ask again
-                await self.send_message(msg.chat_id, self.missing_prompt(pending.parsed, db=db, user_id=msg.user_id))
-                return
-
-        if pending:
-            # Merge reply into original message so AI has full context
-            parse_text = f"{pending.original_text}\nMissing info provided by user: {msg.text}"
-
         try:
             parse_msg = InboundMessage(
                 text=parse_text,
@@ -541,7 +611,6 @@ class TelegramPlugin(AuthFlowMixin, BasePlugin):
             parsed = self.parse(parse_msg, db)
         except Exception as exc:
             log.exception("AI parse failed")
-            _pending.pop(msg.chat_id, None)
             await self.send_message(msg.chat_id, f"Couldn't parse that: {exc}")
             return
 
@@ -550,12 +619,10 @@ class TelegramPlugin(AuthFlowMixin, BasePlugin):
             "transaction", "list_transactions", "list_accounts",
             "list_categories", "list_budgets", "list_lending", "report"
         )):
-            _pending.pop(msg.chat_id, None)
             await self.send_message(msg.chat_id, parsed.reply or "Hey! Send me an expense or income to log.")
             return
 
         if parsed.action == "list_transactions":
-            _pending.pop(msg.chat_id, None)
             from datetime import date as _date
             from services import list_transactions, format_transactions_list_message, get_user_currency
             today = _date.today()
@@ -576,13 +643,11 @@ class TelegramPlugin(AuthFlowMixin, BasePlugin):
             return
 
         if parsed.action == "list_accounts":
-            _pending.pop(msg.chat_id, None)
             reply = self.maybe_list_accounts(msg, db)
             await self.send_message(msg.chat_id, reply or "No accounts found.")
             return
 
         if parsed.action == "list_categories":
-            _pending.pop(msg.chat_id, None)
             from services import get_categories
             cats = get_categories(db)
             lines = ["*Categories:*\n"] + [f"  {c['icon']}  {c['name']}" for c in cats]
@@ -590,41 +655,34 @@ class TelegramPlugin(AuthFlowMixin, BasePlugin):
             return
 
         if parsed.action == "list_budgets":
-            _pending.pop(msg.chat_id, None)
             reply = self.maybe_list_budgets(msg, db)
             await self.send_message(msg.chat_id, reply or "No budgets found.")
             return
 
         if parsed.action == "list_lending":
-            _pending.pop(msg.chat_id, None)
             reply = await self.maybe_handle_lending(msg, db)
             await self.send_message(msg.chat_id, reply or "No lending records found.")
             return
 
         if parsed.action == "report":
-            _pending.pop(msg.chat_id, None)
             report = await self.maybe_get_report(msg, db)
             await self.send_message(msg.chat_id, report or "No report data.")
             return
 
         # Treat as chat if there's no amount and nothing is missing
-        # (AI occasionally misclassifies greetings as transactions with empty missing list)
         if parsed.amount is None and not parsed.missing:
-            _pending.pop(msg.chat_id, None)
             await self.send_message(msg.chat_id, parsed.reply or "Hey! Send me an expense or income to log.")
             return
 
         if parsed.missing:
-            # Store context so the next reply can fill in the gaps
             _pending[msg.chat_id] = _PendingTx(
-                original_text=pending.original_text if pending else (msg.text or ""),
+                original_text=msg.text or "",
                 parsed=parsed,
             )
             await self.send_message(msg.chat_id, self.missing_prompt(parsed, db=db, user_id=msg.user_id))
             return
 
-        # All fields resolved — clear pending and save
-        _pending.pop(msg.chat_id, None)
+        # All fields resolved — save
         try:
             self.save(parsed, db, msg)
         except Exception as exc:
